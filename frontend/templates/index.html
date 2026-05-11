@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>EmlakPro</title>
+  <meta name="theme-color" content="#0d1b3e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="EmlakPro">
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="apple-touch-icon" href="/static/img/icon-192.png">
+  <link rel="icon" type="image/png" href="/static/img/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,700;1,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+
+<!-- GİRİŞ -->
+<div id="login-screen" class="login-screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <img src="/static/img/icon-192.png" alt="EmlakPro" class="login-logo-img">
+      <div class="login-logo-text">
+        <span class="logo-emlak">Emlak</span><span class="logo-pro">Pro</span>
+      </div>
+    </div>
+    <p class="login-subtitle">Portföy Yönetim Sistemi</p>
+    <div id="login-error" class="alert alert-error" style="display:none"></div>
+    <div class="form-group">
+      <label>Kullanıcı Adı</label>
+      <input id="login-username" type="text" placeholder="admin" autocomplete="username">
+    </div>
+    <div class="form-group">
+      <label>Şifre</label>
+      <input id="login-password" type="password" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn btn-gold btn-block" id="login-btn">Giriş Yap</button>
+  </div>
+</div>
+
+<!-- ANA UYGULAMA -->
+<div id="app" class="app" style="display:none">
+
+  <header class="header">
+    <div class="logo">
+      <img src="/static/img/icon-192.png" alt="EmlakPro" class="header-logo-img">
+      <span class="logo-text">
+        <span class="logo-emlak">Emlak</span><span class="logo-pro">Pro</span>
+      </span>
+    </div>
+    <nav class="nav">
+      <button class="nav-btn active" data-page="ilanlar">📋 Portföy</button>
+      <button class="nav-btn" data-page="talepler">🎯 Talepler</button>
+      <button class="nav-btn" data-page="gorevler">✅ Görevler</button>
+      <button class="nav-btn admin-only" data-page="admin" style="display:none">🔧 Admin</button>
+    </nav>
+    <div class="hdr-right">
+      <button class="btn btn-gold btn-sm" id="yeni-ilan-btn">+ İlan Ekle</button>
+      <div class="avatar" id="user-avatar" title="">A</div>
+      <button class="btn btn-outline btn-sm" id="logout-btn">Çıkış</button>
+    </div>
+  </header>
+
+  <div class="main">
+
+    <!-- PORTFÖY (İLANLAR) -->
+    <div class="page active" id="page-ilanlar">
+      <div class="toolbar">
+        <input type="text" id="search-input" placeholder="🔍 İlan ara..." class="toolbar-search">
+        <select id="filter-property"></select>
+        <select id="filter-tip"></select>
+        <select id="filter-ilce"></select>
+        <span id="filter-oda-wrap" style="display:none">
+          <select id="filter-oda"><option value="">Tüm Odalar</option></select>
+        </span>
+        <span id="filter-m2-wrap" style="display:none">
+          <input type="number" id="filter-m2" placeholder="Min m²" style="width:90px">
+        </span>
+        <label class="mine-check">
+          <input type="checkbox" id="filter-mine"> Benim İlanlarım
+        </label>
+      </div>
+      <div class="grid" id="ilan-grid"></div>
+      <div class="empty-state" id="ilan-empty" style="display:none">
+        <div class="big-icon">🏚️</div>
+        <p>Hiç ilan bulunamadı.</p>
+      </div>
+    </div>
+
+    <!-- TALEPLER -->
+    <div class="page" id="page-talepler">
+      <div class="toolbar">
+        <input type="text" id="talep-search" placeholder="🔍 Müşteri veya talep ara..." class="toolbar-search">
+        <select id="talep-tip-filter"><option value="">Satılık / Kiralık</option></select>
+        <select id="talep-ilce-filter"><option value="">Tüm İlçeler</option></select>
+        <button class="btn btn-gold btn-sm" style="margin-left:auto" id="yeni-talep-btn">+ Talep Ekle</button>
+      </div>
+      <div class="talep-list" id="talep-list"></div>
+    </div>
+
+    <!-- GÖREVLER -->
+    <div class="page" id="page-gorevler">
+      <div class="empty-state">
+        <div class="big-icon">✅</div>
+        <p>Görevler yakında burada!</p>
+      </div>
+    </div>
+
+    <!-- ADMIN -->
+    <div class="page" id="page-admin">
+      <div class="admin-tabs">
+        <button class="admin-tab active" data-tab="admin-users">👥 Kullanıcılar</button>
+        <button class="admin-tab" data-tab="admin-listings">📋 Tüm İlanlar</button>
+        <button class="admin-tab" data-tab="admin-requests">🎯 Tüm Talepler</button>
+      </div>
+      <div class="admin-panel active" id="admin-users">
+        <div class="toolbar">
+          <h3 style="font-size:15px;font-weight:700">Kullanıcı Listesi</h3>
+          <button class="btn btn-blue btn-sm" style="margin-left:auto" id="yeni-kullanici-btn">+ Kullanıcı Ekle</button>
+        </div>
+        <div id="users-table"></div>
+      </div>
+      <div class="admin-panel" id="admin-listings"><div id="admin-listings-list"></div></div>
+      <div class="admin-panel" id="admin-requests"><div id="admin-requests-list"></div></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- DETAY MODAL -->
+<div class="overlay" id="detail-overlay">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h3 id="detail-title">İlan Detayı</h3>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-outline btn-sm" id="detail-share-btn">🔗 Paylaş</button>
+        <button class="btn btn-blue btn-sm" id="detail-edit-btn">✏️ Düzenle</button>
+        <button class="close-btn" id="close-detail">×</button>
+      </div>
+    </div>
+    <div id="detail-content"></div>
+  </div>
+</div>
+
+<!-- LIGHTBOX -->
+<div id="lightbox" class="lightbox">
+  <img id="lightbox-img" src="" alt="">
+</div>
+
+<!-- İLAN MODAL -->
+<div class="overlay" id="ilan-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title">Yeni İlan Ekle</h3>
+      <button class="close-btn" id="close-modal">×</button>
+    </div>
+    <div id="ilan-form-body"></div>
+    <div class="form-group">
+      <label>Vitrin Resmi <span class="muted">(1920×1080)</span></label>
+      <div class="upload-zone" id="cover-zone">
+        <input type="file" id="cover-input" accept="image/*">
+        <div class="upload-placeholder" id="cover-placeholder">
+          <span class="upload-icon">🖼️</span>
+          <p>Tıkla veya sürükle-bırak</p>
+        </div>
+        <div class="cover-preview" id="cover-preview" style="display:none">
+          <img id="cover-img" src="" alt="Vitrin">
+          <button class="remove-cover" id="remove-cover">×</button>
+        </div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Galeri Resimleri <span class="muted">(maks. 12)</span></label>
+      <div class="upload-zone upload-zone-sm" id="gallery-zone">
+        <input type="file" id="gallery-input" accept="image/*" multiple>
+        <div class="upload-placeholder">
+          <span class="upload-icon">📷</span>
+          <p>Tıkla veya sürükle-bırak</p>
+        </div>
+      </div>
+      <div class="gallery-preview" id="gallery-preview"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="iptal-btn">İptal</button>
+      <button class="btn btn-blue" id="kaydet-btn">💾 Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<!-- TALEP MODAL -->
+<div class="overlay" id="talep-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="talep-modal-title">Yeni Talep Ekle</h3>
+      <button class="close-btn" id="close-talep-modal">×</button>
+    </div>
+    <div id="talep-form-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="talep-iptal-btn">İptal</button>
+      <button class="btn btn-blue" id="talep-kaydet-btn">💾 Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<!-- KULLANICI MODAL -->
+<div class="overlay" id="user-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Yeni Kullanıcı Ekle</h3>
+      <button class="close-btn" id="close-user-modal">×</button>
+    </div>
+    <div class="form-group"><label>Kullanıcı Adı</label><input id="u-username" type="text" placeholder="ahmet"></div>
+    <div class="form-group"><label>Ad Soyad</label><input id="u-fullname" type="text" placeholder="Ahmet Yılmaz"></div>
+    <div class="form-group"><label>E-posta</label><input id="u-email" type="email" placeholder="ahmet@firma.com"></div>
+    <div class="form-group"><label>Şifre</label><input id="u-password" type="password" placeholder="En az 6 karakter"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="user-iptal-btn">İptal</button>
+      <button class="btn btn-blue" id="user-kaydet-btn">💾 Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/static/js/api.js"></script>
+<script src="/static/js/app.js"></script>
+<script>
+// PWA Service Worker kaydı
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/static/sw.js')
+      .then(reg => console.log('SW kayıtlı:', reg.scope))
+      .catch(err => console.log('SW hatası:', err));
+  });
+}
+</script>
+</body>
+</html>

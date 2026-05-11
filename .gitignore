@@ -1,0 +1,33 @@
+# Binary
+bin/
+*.exe
+
+# Config (şifreler burada — asla commit etme!)
+config.json
+config.*.json
+
+# Upload dosyaları
+uploads/
+
+# Go
+vendor/
+*.test
+coverage.out
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Log
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Ortam değişkenleri
+.env
+.env.*
