@@ -49,9 +49,10 @@ func main() {
 		}
 	}
 
-	userRepo    := repository.NewUserRepository(db)
-	listingRepo := repository.NewListingRepository(db)
-	requestRepo := repository.NewRequestRepository(db)
+	userRepo     := repository.NewUserRepository(db)
+	listingRepo  := repository.NewListingRepository(db)
+	requestRepo  := repository.NewRequestRepository(db)
+	customerRepo := repository.NewCustomerRepository(db)
 
 	tokenSvc := auth.NewTokenService(
 		cfg.Auth.JWTSecret,
@@ -66,12 +67,14 @@ func main() {
 
 	authMW := middleware.NewAuthMiddleware(tokenSvc)
 
-	authHandler    := handler.NewAuthHandler(cfg, userRepo, tokenSvc)
-	listingHandler := handler.NewListingHandler(cfg, listingRepo, imageSvc)
-	uploadHandler  := handler.NewUploadHandler(cfg, imageSvc)
-	requestHandler := handler.NewRequestHandler(cfg, requestRepo)
-	adminHandler   := handler.NewAdminHandler(cfg, userRepo, listingRepo, requestRepo)
-	configHandler  := handler.NewConfigHandler(cfg)
+	authHandler      := handler.NewAuthHandler(cfg, userRepo, tokenSvc)
+	listingHandler   := handler.NewListingHandler(cfg, listingRepo, imageSvc)
+	uploadHandler    := handler.NewUploadHandler(cfg, imageSvc)
+	requestHandler   := handler.NewRequestHandler(cfg, requestRepo)
+	adminHandler     := handler.NewAdminHandler(cfg, userRepo, listingRepo, requestRepo)
+	configHandler    := handler.NewConfigHandler(cfg)
+	customerHandler  := handler.NewCustomerHandler(cfg, customerRepo, listingRepo, imageSvc)
+	dashboardHandler := handler.NewDashboardHandler(db)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -109,22 +112,41 @@ func main() {
 			r.Post("/auth/logout", authHandler.Logout)
 			r.Get("/auth/me",     authHandler.Me)
 
+			// İlanlar
 			r.Get("/listings",                           listingHandler.List)
 			r.Post("/listings",                          listingHandler.Create)
 			r.Get("/listings/{id}",                      listingHandler.GetByID)
 			r.Put("/listings/{id}",                      listingHandler.Update)
 			r.Patch("/listings/{id}/toggle",             listingHandler.ToggleActive)
+			r.Patch("/listings/{id}/listed",             listingHandler.ToggleListed)
+			r.Get("/listings/{id}/history",              listingHandler.GetHistory)
 			r.Delete("/listings/{id}/images/{imgID}",    listingHandler.DeleteImage)
 
+			// Upload
 			r.Post("/upload/cover",   uploadHandler.Cover)
 			r.Post("/upload/gallery", uploadHandler.Gallery)
 
-			r.Get("/requests",              requestHandler.List)
-			r.Post("/requests",             requestHandler.Create)
-			r.Put("/requests/{id}",         requestHandler.Update)
+			// Talepler
+			r.Get("/requests",               requestHandler.List)
+			r.Post("/requests",              requestHandler.Create)
+			r.Put("/requests/{id}",          requestHandler.Update)
 			r.Patch("/requests/{id}/toggle", requestHandler.ToggleActive)
 			r.Patch("/requests/{id}/notify", requestHandler.ToggleNotify)
 
+			// Müşteriler (CRM)
+			r.Get("/customers",                              customerHandler.List)
+			r.Post("/customers",                             customerHandler.Create)
+			r.Put("/customers/{id}",                         customerHandler.Update)
+			r.Patch("/customers/{id}/toggle",                customerHandler.ToggleActive)
+			r.Delete("/customers/{id}",                      customerHandler.Delete)
+			r.Get("/customers/{id}/listings",                customerHandler.GetListings)
+			r.Post("/customers/{id}/listings",               customerHandler.LinkListing)
+			r.Delete("/customers/{id}/listings/{listingID}", customerHandler.UnlinkListing)
+
+			// Dashboard
+			r.Get("/dashboard", dashboardHandler.Stats)
+
+			// Admin
 			r.Group(func(r chi.Router) {
 				r.Use(authMW.RequireAdmin)
 				r.Get("/admin/users",               adminHandler.ListUsers)

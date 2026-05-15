@@ -1,16 +1,22 @@
 /* ============================================================
-   EmlakPro — app.js  v3
+   EmlakPro — app.js  v4
    ============================================================ */
 
 const state = {
   cfg: null,
   listings: [],
   requests: [],
+  customers: [],
   editListingId: null,
   editRequestId: null,
   editDetailId:  null,
+  editCustomerId: null,
+  viewCustomerId: null,
+  passiveTargetId: null,
+  passiveStatus: 'satildi',
   coverPath: '', coverURL: '',
   galleryPaths: [], galleryExisting: [], removedImageIds: [],
+  dashCharts: {},
 };
 
 /* ── Başlatma ──────────────────────────────────────────────── */
@@ -79,27 +85,28 @@ function fiyatFormat(n) {
   if (!n) return '—';
   return n.toLocaleString('tr-TR') + ' ₺';
 }
-
-// Input'a yazarken binlik ayraç
 function formatPriceInput(el) {
   const raw = el.value.replace(/\./g,'').replace(/[^0-9]/g,'');
   if (!raw) { el.value = ''; el.dataset.raw = ''; return; }
   el.dataset.raw = raw;
   el.value = parseInt(raw).toLocaleString('tr-TR');
 }
-
 function getRawPrice(id) {
   const el = document.getElementById(id);
   if (!el) return '';
   return el.dataset.raw || el.value.replace(/\./g,'').replace(/[^0-9]/g,'');
 }
-
 function setPriceInput(id, val) {
   const el = document.getElementById(id);
   if (!el) return;
   if (!val) { el.value=''; el.dataset.raw=''; return; }
   el.dataset.raw = val;
   el.value = parseInt(val).toLocaleString('tr-TR');
+}
+function formatDisplayPrice(val) {
+  if (!val) return '';
+  const n = parseInt(val);
+  return isNaN(n) ? '' : n.toLocaleString('tr-TR');
 }
 
 function showToast(msg, type='info') {
@@ -116,7 +123,9 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     this.classList.add('active');
     document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
     document.getElementById('page-'+this.dataset.page).classList.add('active');
-    if (this.dataset.page==='admin') loadAdminPanel();
+    if (this.dataset.page==='admin')      loadAdminPanel();
+    if (this.dataset.page==='musteriler') loadCustomers();
+    if (this.dataset.page==='dashboard')  loadDashboard();
   });
 });
 document.querySelectorAll('.admin-tab').forEach(btn => {
@@ -132,7 +141,7 @@ document.querySelectorAll('.admin-tab').forEach(btn => {
 });
 
 /* ═══════════════════════════════════════════════════════
-   İLAN PLACEHOLDER — mülk tipine göre gradient
+   İLAN PLACEHOLDER
 ════════════════════════════════════════════════════════ */
 const PROP_PLACEHOLDER = {
   'Daire':  { grad: 'linear-gradient(135deg,#1565C0 0%,#42a5f5 100%)', icon: '🏢', label: 'Daire' },
@@ -149,6 +158,10 @@ function cardPlaceholder(propType) {
     ${p.label ? `<span class="card-img-label">${p.label}</span>` : ''}
   </div>`;
 }
+
+/* ── Durum etiketi ─────────────────────────────────────────── */
+const STATUS_LABEL = { aktif:'Aktif', satildi:'Satıldı', kiralandi:'Kiralandı', bekliyor:'Bekliyor' };
+const STATUS_COLOR = { aktif:'tag-green', satildi:'tag-red', kiralandi:'tag-blue', bekliyor:'tag-amber' };
 
 /* ═══════════════════════════════════════════════════════
    İLANLAR
@@ -189,12 +202,21 @@ function renderListings() {
     }).join('');
 
     const isOwner  = il.user_id===userID||API.isAdmin();
-    const isPassive = !il.is_active;
-    const badge = isPassive&&isOwner
-      ? `<span class="badge badge-passive">Pasif</span>`
-      : !isPassive
-        ? `<span class="badge badge-${il.fields?.listing_type==='Satılık'?'sale':'rent'}">${il.fields?.listing_type||''}</span>`
-        : '';
+    const isPassive= !il.is_active;
+    const isUnlisted = il.is_active && !il.is_listed;
+
+    // Durum badge
+    let badge = '';
+    if (isPassive && isOwner) {
+      const stKey = il.status || 'bekliyor';
+      badge = `<span class="badge badge-passive">${STATUS_LABEL[stKey]||'Pasif'}</span>`;
+    } else if (!isPassive) {
+      badge = `<span class="badge badge-${il.fields?.listing_type==='Satılık'?'sale':'rent'}">${il.fields?.listing_type||''}</span>`;
+    }
+
+    // Listeleme uyarısı
+    const unlistedBadge = isUnlisted && isOwner
+      ? `<span class="badge badge-unlisted" title="Ana sayfada gösterilmiyor">👁 Gizli</span>` : '';
 
     const noTag = il.listing_no ? `<span class="listing-no">#${il.listing_no}</span>` : '';
     const imgHTML = il.cover_image
@@ -204,20 +226,22 @@ function renderListings() {
     const ownerActions = isOwner ? `
       <div class="card-actions">
         <button class="icon-btn icon-btn-edit" onclick="openEditListing(${il.id},event)" title="Düzenle">✏️</button>
+        <button class="icon-btn icon-btn-listed ${il.is_listed?'':'icon-btn-unlisted'}"
+          onclick="doToggleListed(${il.id},event)"
+          title="${il.is_listed?'Ana sayfadan gizle':'Ana sayfada göster'}">${il.is_listed?'👁':'👁‍🗨'}</button>
         <button class="icon-btn icon-btn-toggle" onclick="doToggleListing(${il.id},event)"
           title="${il.is_active?'Pasif Yap':'Aktif Yap'}">${il.is_active?'⏸':'▶️'}</button>
       </div>` : '';
 
-    // Fiyat — tam format
     const priceMin = il.fields?.price_min;
     const priceMax = il.fields?.price_max;
     const priceDisplay = priceMin||priceMax
       ? (priceMin&&priceMax ? `${fiyatFormat(priceMin)} – ${fiyatFormat(priceMax)}` : fiyatFormat(priceMin||priceMax))
       : fiyatFormat(il.fields?.price);
 
-    return `<div class="card${isPassive?' card-passive':''}" data-id="${il.id}">
+    return `<div class="card${isPassive?' card-passive':''}${isUnlisted?' card-unlisted':''}" data-id="${il.id}">
       <div class="card-img">
-        ${imgHTML}${badge}${noTag}${ownerActions}
+        ${imgHTML}${badge}${unlistedBadge}${noTag}${ownerActions}
       </div>
       <div class="card-body">
         <div class="card-title">${il.fields?.title||'—'}</div>
@@ -249,11 +273,74 @@ document.getElementById('filter-property')?.addEventListener('change', function(
   updatePropertyFilter(this.value); loadListings();
 });
 
-async function doToggleListing(id,e) {
+/* ── İlan Toggle (is_active) ───────────────────────────────── */
+async function doToggleListing(id, e) {
   e.stopPropagation();
-  try { await API.toggleListing(id); await loadListings(); showToast('Durum güncellendi.'); }
-  catch(err) { showToast(err.message,'error'); }
+  const il = state.listings.find(l=>l.id===id);
+  if (!il) return;
+
+  if (il.is_active) {
+    // Aktif → Pasif: durum sorusu sor
+    openPassiveModal(id, il.fields?.title||'');
+  } else {
+    // Pasif → Aktif: direkt
+    try {
+      await API.toggleListing(id, {});
+      await loadListings();
+      showToast('İlan aktif edildi.');
+    } catch(err) { showToast(err.message,'error'); }
+  }
 }
+
+/* ── İlan Toggle (is_listed) ───────────────────────────────── */
+async function doToggleListed(id, e) {
+  e.stopPropagation();
+  try {
+    await API.toggleListingListed(id);
+    await loadListings();
+    const il = state.listings.find(l=>l.id===id);
+    showToast(il?.is_listed ? 'İlan ana sayfada görünüyor.' : 'İlan ana sayfadan gizlendi.');
+  } catch(err) { showToast(err.message,'error'); }
+}
+
+/* ── Pasife Alma Modal ─────────────────────────────────────── */
+function openPassiveModal(id, title) {
+  state.passiveTargetId = id;
+  state.passiveStatus   = 'satildi';
+  document.getElementById('passive-listing-name').textContent = title;
+  document.getElementById('passive-price').value = '';
+  document.getElementById('passive-price').dataset.raw = '';
+  // Reset butonlar
+  document.querySelectorAll('.status-opt').forEach(b => b.classList.remove('status-opt-sel'));
+  document.querySelector('.status-opt[data-val="satildi"]')?.classList.add('status-opt-sel');
+  document.getElementById('passive-overlay').classList.add('open');
+}
+document.querySelectorAll('.status-opt').forEach(btn => {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.status-opt').forEach(b=>b.classList.remove('status-opt-sel'));
+    this.classList.add('status-opt-sel');
+    state.passiveStatus = this.dataset.val;
+  });
+});
+document.getElementById('close-passive-modal').addEventListener('click', () =>
+  document.getElementById('passive-overlay').classList.remove('open'));
+document.getElementById('passive-iptal-btn').addEventListener('click', () =>
+  document.getElementById('passive-overlay').classList.remove('open'));
+document.getElementById('passive-kaydet-btn').addEventListener('click', async () => {
+  const id = state.passiveTargetId;
+  if (!id) return;
+  const rawPrice = getRawPrice('passive-price');
+  const body = {
+    status: state.passiveStatus,
+    closing_price: rawPrice ? parseInt(rawPrice) : null,
+  };
+  try {
+    await API.toggleListing(id, body);
+    document.getElementById('passive-overlay').classList.remove('open');
+    await loadListings();
+    showToast('İlan pasife alındı.');
+  } catch(err) { showToast(err.message,'error'); }
+});
 
 /* ─── Detay Modal ─────────────────────────────────────────── */
 async function openDetailModal(id) {
@@ -265,7 +352,6 @@ async function openDetailModal(id) {
     const propType= il.fields?.property_type||'Daire';
     const sumKeys = cfg?.listing_fields?.summary_fields||[];
 
-    // Fiyat gösterimi
     const priceMin = il.fields?.price_min;
     const priceMax = il.fields?.price_max;
     const priceVal = priceMin||priceMax
@@ -280,6 +366,17 @@ async function openDetailModal(id) {
       return `<tr><td class="detail-label">${fd?.label||k}</td><td>${k==='price'?fiyatFormat(v):v}</td></tr>`;
     }).join('');
 
+    // Durum satırı
+    const stKey = il.status||'aktif';
+    const statusRow = `<tr><td class="detail-label">Durum</td><td>
+      <span class="tag ${STATUS_COLOR[stKey]||'tag-green'}">${STATUS_LABEL[stKey]||stKey}</span>
+      ${il.closing_price ? ` · <b>${fiyatFormat(il.closing_price)}</b>` : ''}
+    </td></tr>`;
+    // Listeleme satırı
+    const listedRow = `<tr><td class="detail-label">Vitrin</td><td>
+      <span class="tag ${il.is_listed?'tag-green':'tag-amber'}">${il.is_listed?'Listelendi':'Gizli'}</span>
+    </td></tr>`;
+
     const priceRow = `<tr><td class="detail-label">Fiyat</td><td><b>${priceVal}</b></td></tr>`;
     const noHTML   = il.listing_no ? `<div class="detail-no">İlan No: <b>#${il.listing_no}</b></div>` : '';
     const coverHTML= il.cover_image ? `<div class="detail-cover"><img src="${il.cover_image}" alt="" loading="lazy"></div>` : '';
@@ -290,7 +387,7 @@ async function openDetailModal(id) {
 
     document.getElementById('detail-content').innerHTML = `
       ${coverHTML}${noHTML}
-      <table class="detail-table">${priceRow}${rows}</table>
+      <table class="detail-table">${priceRow}${statusRow}${listedRow}${rows}</table>
       ${gallery}
       ${il.fields?.description?`<div class="detail-desc"><b>Açıklama:</b><p>${il.fields.description}</p></div>`:''}
     `;
@@ -321,6 +418,49 @@ document.getElementById('detail-edit-btn').addEventListener('click',()=>{
   document.getElementById('detail-overlay').classList.remove('open');
   openEditListing(state.editDetailId);
 });
+document.getElementById('detail-history-btn').addEventListener('click', async ()=>{
+  if (!state.editDetailId) return;
+  await openHistoryModal(state.editDetailId);
+});
+
+/* ─── Tarihçe Modal ───────────────────────────────────────── */
+async function openHistoryModal(listingId) {
+  document.getElementById('history-overlay').classList.add('open');
+  document.getElementById('history-content').innerHTML = '<div class="muted" style="padding:16px">Yükleniyor...</div>';
+  try {
+    const history = await API.getListingHistory(listingId);
+    if (!history.length) {
+      document.getElementById('history-content').innerHTML = '<div class="muted" style="padding:16px;text-align:center">Tarihçe yok.</div>';
+      return;
+    }
+    const ACTION_LABEL = {
+      created:'Oluşturuldu', updated:'Güncellendi',
+      activated:'Aktif Edildi', deactivated:'Pasife Alındı',
+      listed:'Listeye Alındı', unlisted:'Listeden Çıkarıldı'
+    };
+    const ACTION_ICON = {
+      created:'✨', updated:'✏️', activated:'▶️', deactivated:'⏸',
+      listed:'👁', unlisted:'👁‍🗨'
+    };
+    document.getElementById('history-content').innerHTML =
+      `<div class="history-list">${history.map(h=>`
+        <div class="history-item">
+          <div class="history-icon">${ACTION_ICON[h.action]||'•'}</div>
+          <div class="history-info">
+            <div class="history-action">${ACTION_LABEL[h.action]||h.action}</div>
+            <div class="history-meta">
+              ${h.user_name} · ${new Date(h.created_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})}
+              ${h.status&&h.status!=='aktif'?`<span class="tag tag-sm ${STATUS_COLOR[h.status]||''}" style="margin-left:6px">${STATUS_LABEL[h.status]||h.status}</span>`:''}
+              ${h.closing_price?`<span class="history-price">${fiyatFormat(h.closing_price)}</span>`:''}
+            </div>
+          </div>
+        </div>`).join('')}</div>`;
+  } catch(e) {
+    document.getElementById('history-content').innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+  }
+}
+document.getElementById('close-history-modal').addEventListener('click',()=>
+  document.getElementById('history-overlay').classList.remove('open'));
 
 /* ─── İlan Form ───────────────────────────────────────────── */
 document.getElementById('yeni-ilan-btn').addEventListener('click',()=>openIlanModal());
@@ -368,7 +508,7 @@ function renderIlanFormFields(allFields, ilan, isAdmin, propType) {
 
   const html = allFields
     .filter(f => !f.admin_only||isAdmin)
-    .filter(f => f.key!=='price') // price yerine price_min/max kullanıyoruz
+    .filter(f => f.key!=='price')
     .map(f => {
       const isAlways = alwaysShow.includes(f.key);
       const inProp   = propSpecificKeys ? propSpecificKeys.includes(f.key) : true;
@@ -384,7 +524,6 @@ function renderIlanFormFields(allFields, ilan, isAdmin, propType) {
       } else if (f.type==='textarea') {
         input = `<textarea id="f-${f.key}" rows="3">${val}</textarea>`;
       } else {
-        // Fiyat inputlarına binlik format
         const isPrice = f.key==='price_min'||f.key==='price_max';
         input = `<input id="f-${f.key}" type="text" inputmode="${f.type==='number'?'numeric':''}"
           value="${isPrice?formatDisplayPrice(val):val}"
@@ -399,7 +538,6 @@ function renderIlanFormFields(allFields, ilan, isAdmin, propType) {
       </div>`;
     }).join('');
 
-  // Fiyat aralığı bloğu
   const priceMinVal = ilan?.fields?.price_min||'';
   const priceMaxVal = ilan?.fields?.price_max||'';
   const priceBlock = `
@@ -416,20 +554,11 @@ function renderIlanFormFields(allFields, ilan, isAdmin, propType) {
       </div>
     </div>`;
 
-  // Fiyat bloğunu title'dan sonra ekle
-  const titleIdx = allFields.findIndex(f=>f.key==='title');
-  const parts = html.split('</div>\n');
   document.getElementById('ilan-form-body').innerHTML = html + priceBlock;
 
   document.getElementById('f-property_type')?.addEventListener('change', function() {
     updateIlanFormForPropType(this.value, allFields, isAdmin);
   });
-}
-
-function formatDisplayPrice(val) {
-  if (!val) return '';
-  const n = parseInt(val);
-  return isNaN(n) ? '' : n.toLocaleString('tr-TR');
 }
 
 function updateIlanFormForPropType(propType, allFields, isAdmin) {
@@ -455,7 +584,6 @@ document.getElementById('kaydet-btn').addEventListener('click', async ()=>{
   });
   fields.price_min = getRawPrice('f-price_min');
   fields.price_max = getRawPrice('f-price_max');
-  // price alanını da doldur (geriye dönük uyumluluk)
   fields.price = fields.price_max || fields.price_min;
 
   if (!fields.title) { showToast('Başlık zorunludur','error'); return; }
@@ -559,7 +687,6 @@ function calcMatchScore(talep, ilan) {
   check(talep.fields?.listing_type,  ilan.fields?.listing_type,  25);
   check(talep.fields?.property_type, ilan.fields?.property_type, 20);
   check(talep.fields?.district,      ilan.fields?.district,      20);
-  // Bütçe: talep budget_max ile ilan price karşılaştır
   total+=20;
   const budgetMax = parseInt(talep.fields?.budget_max||talep.fields?.budget)||0;
   const budgetMin = parseInt(talep.fields?.budget_min)||0;
@@ -567,9 +694,7 @@ function calcMatchScore(talep, ilan) {
   if (!budgetMax) score+=20;
   else if (price<=budgetMax) score+=20;
   else if (price<=budgetMax*1.1) score+=10;
-  // Bütçe alt sınır
-  if (budgetMin && price < budgetMin) return 0; // alt sınırın altı = eşleşme yok
-  // Oda
+  if (budgetMin && price < budgetMin) return 0;
   total+=15;
   const tOda=talep.fields?.rooms, iOda=ilan.fields?.rooms;
   if(!tOda) score+=15; else if(tOda===iOda) score+=15;
@@ -606,7 +731,6 @@ function renderRequests() {
       .filter(m=>m.score>0)
       .sort((a,b)=>b.score-a.score);
 
-    // Bütçe gösterimi
     const bMin=t.fields?.budget_min, bMax=t.fields?.budget_max||t.fields?.budget;
     const budgetDisplay = bMin&&bMax
       ? `${fiyatFormat(bMin)} – ${fiyatFormat(bMax)}`
@@ -718,7 +842,6 @@ function closeTalepModal() { document.getElementById('talep-overlay').classList.
 
 function buildTalepForm(talep) {
   const cfg    = state.cfg;
-  // Önce kritik alanlar, en sona notlar
   const commonRaw = cfg?.request_fields?.common||[];
   const notesField = commonRaw.find(f=>f.key==='notes');
   const common = [...commonRaw.filter(f=>f.key!=='notes'&&f.key!=='budget')];
@@ -741,7 +864,6 @@ function buildTalepForm(talep) {
     return `<input id="tf-${f.key}" type="${f.type}" value="${val}" placeholder="${f.label}" ${f.required?'required':''}>`;
   };
 
-  // Bütçe bloğu — min/max
   const bMin=talep?.fields?.budget_min||'', bMax=talep?.fields?.budget_max||talep?.fields?.budget||'';
   const budgetBlock=`
     <div class="form-group">
@@ -765,7 +887,6 @@ function buildTalepForm(talep) {
     </div>`;
   }).join('');
 
-  // Notlar en alta
   const notesHTML = notesField ? `<div class="form-group">
     <label>${notesField.label}</label>
     <textarea id="tf-notes" rows="2">${talep?.fields?.notes||''}</textarea>
@@ -780,7 +901,6 @@ function buildTalepForm(talep) {
       </label>
     </div>`;
 
-  // property_type değişince — sadece ilgili alanları güncelle, mevcut değerleri koru
   document.getElementById('tf-property_type')?.addEventListener('change', function() {
     const currentVals = {};
     document.querySelectorAll('#talep-form-body [id^="tf-"]').forEach(el=>{
@@ -788,7 +908,6 @@ function buildTalepForm(talep) {
     });
     const newTalep = { ...talep, fields: { ...talep?.fields, ...currentVals, property_type: this.value }, notify_me: document.getElementById('tf-notify')?.checked };
     buildTalepForm(newTalep);
-    // property_type'ı restore et
     const pt = document.getElementById('tf-property_type');
     if(pt) pt.value = this.value;
   });
@@ -806,7 +925,7 @@ document.getElementById('talep-kaydet-btn').addEventListener('click', async ()=>
   });
   fields.budget_min=getRawPrice('tf-budget_min');
   fields.budget_max=getRawPrice('tf-budget_max');
-  fields.budget=fields.budget_max||fields.budget_min; // geriye dönük
+  fields.budget=fields.budget_max||fields.budget_min;
   fields.notes=document.getElementById('tf-notes')?.value||'';
 
   if(!fields.client_name){showToast('Müşteri adı zorunludur','error');return;}
@@ -818,6 +937,327 @@ document.getElementById('talep-kaydet-btn').addEventListener('click', async ()=>
     closeTalepModal(); await loadRequests();
   } catch(e){showToast(e.message,'error');}
 });
+
+/* ═══════════════════════════════════════════════════════
+   MÜŞTERİLER (CRM)
+════════════════════════════════════════════════════════ */
+async function loadCustomers() {
+  const q = document.getElementById('musteri-search')?.value || '';
+  try {
+    state.customers = await API.getCustomers(q ? {q} : {})||[];
+    renderCustomers();
+  } catch(e) { showToast('Müşteriler yüklenemedi: '+e.message,'error'); }
+}
+
+function renderCustomers() {
+  const list = document.getElementById('musteri-list');
+  if (!state.customers.length) {
+    list.innerHTML = '<div class="empty-state"><div class="big-icon">👥</div><p>Müşteri bulunamadı.</p></div>';
+    return;
+  }
+  const colors=['#1565C0','#6a1b9a','#1b5e20','#c62828','#e65100','#00695c'];
+  list.innerHTML = state.customers.map((c, idx)=>{
+    const col = colors[idx % colors.length];
+    const harf = (c.name||'M')[0].toUpperCase();
+    return `<div class="crm-card${c.is_active?'':' crm-passive'}" onclick="openCustomerDetail(${c.id})">
+      <div class="crm-avatar" style="background:${col}22;color:${col}">${harf}</div>
+      <div class="crm-info">
+        <div class="crm-name">${c.name}</div>
+        <div class="crm-meta">
+          ${c.phone?`📞 ${c.phone}`:''}
+          ${c.email?` · 📧 ${c.email}`:''}
+          ${c.source?` · <span class="tag tag-sm tag-blue">${c.source}</span>`:''}
+        </div>
+        ${c.notes?`<div class="crm-notes muted">${c.notes.slice(0,80)}${c.notes.length>80?'…':''}</div>`:''}
+      </div>
+      <div class="crm-actions">
+        <button class="icon-btn icon-btn-edit" onclick="openEditCustomer(${c.id},event)">✏️</button>
+        <button class="icon-btn" onclick="doToggleCustomer(${c.id},event)" title="${c.is_active?'Pasife Al':'Aktif Et'}">${c.is_active?'⏸':'▶️'}</button>
+        <button class="icon-btn icon-btn-delete" onclick="doDeleteCustomer(${c.id},event)">🗑️</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+document.getElementById('musteri-search')?.addEventListener('input', loadCustomers);
+document.getElementById('yeni-musteri-btn').addEventListener('click', ()=>openMusteriModal());
+document.getElementById('close-musteri-modal').addEventListener('click', closeMusteriModal);
+document.getElementById('musteri-iptal-btn').addEventListener('click', closeMusteriModal);
+
+function openMusteriModal(c=null) {
+  state.editCustomerId = c?.id||null;
+  document.getElementById('musteri-modal-title').textContent = c ? 'Müşteri Düzenle' : 'Yeni Müşteri';
+  document.getElementById('m-name').value    = c?.name||'';
+  document.getElementById('m-phone').value   = c?.phone||'';
+  document.getElementById('m-email').value   = c?.email||'';
+  document.getElementById('m-source').value  = c?.source||'';
+  document.getElementById('m-notes').value   = c?.notes||'';
+  document.getElementById('musteri-overlay').classList.add('open');
+}
+async function openEditCustomer(id, e) {
+  if(e) e.stopPropagation();
+  const c = state.customers.find(x=>x.id===id);
+  if(c) openMusteriModal(c);
+}
+function closeMusteriModal() { document.getElementById('musteri-overlay').classList.remove('open'); }
+
+document.getElementById('musteri-kaydet-btn').addEventListener('click', async ()=>{
+  const name  = document.getElementById('m-name').value.trim();
+  const phone = document.getElementById('m-phone').value.trim();
+  const email = document.getElementById('m-email').value.trim();
+  const source= document.getElementById('m-source').value;
+  const notes = document.getElementById('m-notes').value.trim();
+  if (!name) { showToast('Ad zorunludur','error'); return; }
+  try {
+    const data = {name, phone, email, source, notes};
+    if (state.editCustomerId) {
+      await API.updateCustomer(state.editCustomerId, data);
+      showToast('✅ Müşteri güncellendi!');
+    } else {
+      await API.createCustomer(data);
+      showToast('🎉 Müşteri eklendi!');
+    }
+    closeMusteriModal();
+    await loadCustomers();
+  } catch(e) { showToast(e.message,'error'); }
+});
+
+async function doToggleCustomer(id, e) {
+  e.stopPropagation();
+  try { await API.toggleCustomer(id); await loadCustomers(); showToast('Durum güncellendi.'); }
+  catch(err) { showToast(err.message,'error'); }
+}
+async function doDeleteCustomer(id, e) {
+  e.stopPropagation();
+  if (!confirm('Müşteriyi silmek istediğinizden emin misiniz?')) return;
+  try { await API.deleteCustomer(id); await loadCustomers(); showToast('Müşteri silindi.'); }
+  catch(err) { showToast(err.message,'error'); }
+}
+
+/* ── Müşteri Detay ─────────────────────────────────────────── */
+async function openCustomerDetail(id) {
+  state.viewCustomerId = id;
+  const c = state.customers.find(x=>x.id===id);
+  if (!c) return;
+  document.getElementById('musteri-detail-name').textContent = c.name;
+  document.getElementById('musteri-detail-content').innerHTML = `
+    <div class="crm-detail-row"><span class="detail-label">Telefon</span><span>${c.phone||'—'}</span></div>
+    <div class="crm-detail-row"><span class="detail-label">E-posta</span><span>${c.email||'—'}</span></div>
+    <div class="crm-detail-row"><span class="detail-label">Kaynak</span><span>${c.source||'—'}</span></div>
+    <div class="crm-detail-row"><span class="detail-label">Danışman</span><span>${c.owner_name||'—'}</span></div>
+    ${c.notes?`<div class="crm-detail-row"><span class="detail-label">Notlar</span><span>${c.notes}</span></div>`:''}
+  `;
+  document.getElementById('musteri-detail-overlay').classList.add('open');
+  await loadCustomerListings(id);
+}
+document.getElementById('close-musteri-detail').addEventListener('click',()=>
+  document.getElementById('musteri-detail-overlay').classList.remove('open'));
+document.getElementById('musteri-detail-edit-btn').addEventListener('click',()=>{
+  document.getElementById('musteri-detail-overlay').classList.remove('open');
+  const c = state.customers.find(x=>x.id===state.viewCustomerId);
+  if(c) openMusteriModal(c);
+});
+
+async function loadCustomerListings(customerId) {
+  try {
+    const listings = await API.getCustomerListings(customerId)||[];
+    const cont = document.getElementById('musteri-listings-list');
+    if (!listings.length) {
+      cont.innerHTML = '<div class="muted" style="padding:8px 0;font-size:13px">Henüz bağlı ilan yok.</div>';
+      return;
+    }
+    cont.innerHTML = listings.map(il=>`
+      <div class="ilan-mini" style="cursor:default">
+        ${il.cover_image?`<img src="${il.cover_image}" alt="" class="ilan-mini-thumb">`:`<div class="ilan-mini-icon">${(PROP_PLACEHOLDER[il.fields?.property_type]||PROP_PLACEHOLDER.default).icon}</div>`}
+        <div class="ilan-mini-info">
+          <div class="ilan-mini-title">${il.fields?.title||'—'} ${il.listing_no?`<span class="mini-no">#${il.listing_no}</span>`:''}</div>
+          <div class="ilan-mini-tags"><span class="meta-tag">${il.fields?.district||''}</span></div>
+        </div>
+        <div class="ilan-mini-right">
+          <span class="ilan-mini-price">${fiyatFormat(il.fields?.price_max||il.fields?.price)}</span>
+          <button class="btn btn-sm btn-danger" onclick="doUnlinkListing(${customerId},${il.id})">Kaldır</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { showToast(e.message,'error'); }
+}
+
+async function doUnlinkListing(customerId, listingId) {
+  try {
+    await API.unlinkListing(customerId, listingId);
+    await loadCustomerListings(customerId);
+    showToast('Bağlantı kaldırıldı.');
+  } catch(e) { showToast(e.message,'error'); }
+}
+
+/* ── İlan Bağla ────────────────────────────────────────────── */
+document.getElementById('link-listing-btn').addEventListener('click', ()=>{
+  const sel = document.getElementById('link-listing-select');
+  sel.innerHTML = '<option value="">Seçin...</option>' +
+    state.listings.map(il=>`<option value="${il.id}">#${il.listing_no} ${il.fields?.title||''}</option>`).join('');
+  document.getElementById('link-listing-note').value = '';
+  document.getElementById('link-listing-overlay').classList.add('open');
+});
+document.getElementById('close-link-listing').addEventListener('click',()=>
+  document.getElementById('link-listing-overlay').classList.remove('open'));
+document.getElementById('link-listing-iptal').addEventListener('click',()=>
+  document.getElementById('link-listing-overlay').classList.remove('open'));
+document.getElementById('link-listing-kaydet').addEventListener('click', async ()=>{
+  const listingId = parseInt(document.getElementById('link-listing-select').value);
+  const note      = document.getElementById('link-listing-note').value;
+  if (!listingId) { showToast('İlan seçin','error'); return; }
+  try {
+    await API.linkListing(state.viewCustomerId, listingId, note);
+    document.getElementById('link-listing-overlay').classList.remove('open');
+    await loadCustomerListings(state.viewCustomerId);
+    showToast('İlan bağlandı!');
+  } catch(e) { showToast(e.message,'error'); }
+});
+
+/* ═══════════════════════════════════════════════════════
+   DASHBOARD
+════════════════════════════════════════════════════════ */
+let _dashCharts = {};
+
+async function loadDashboard() {
+  document.getElementById('dash-content').innerHTML =
+    '<div class="empty-state"><div class="big-icon">📊</div><p>Yükleniyor...</p></div>';
+  try {
+    const d = await API.getDashboard();
+    renderDashboard(d);
+  } catch(e) {
+    document.getElementById('dash-content').innerHTML =
+      `<div class="alert alert-error">Dashboard yüklenemedi: ${e.message}</div>`;
+  }
+}
+
+function renderDashboard(d) {
+  // Mevcut grafikleri yok et
+  Object.values(_dashCharts).forEach(c => c.destroy());
+  _dashCharts = {};
+
+  const isAdmin = API.isAdmin();
+  document.getElementById('dash-content').innerHTML = `
+    <!-- Özet Kartlar -->
+    <div class="dash-cards">
+      <div class="dash-card dash-card-blue">
+        <div class="dash-card-num">${d.total_listings}</div>
+        <div class="dash-card-lbl">Toplam İlan</div>
+      </div>
+      <div class="dash-card dash-card-green">
+        <div class="dash-card-num">${d.active_listings}</div>
+        <div class="dash-card-lbl">Aktif İlan</div>
+      </div>
+      <div class="dash-card dash-card-amber">
+        <div class="dash-card-num">${d.passive_listings}</div>
+        <div class="dash-card-lbl">Pasif İlan</div>
+      </div>
+      <div class="dash-card dash-card-purple">
+        <div class="dash-card-num">${d.listed_listings}</div>
+        <div class="dash-card-lbl">Vitrin'de</div>
+      </div>
+    </div>
+
+    <!-- Grafikler -->
+    <div class="dash-charts">
+      <div class="dash-chart-box">
+        <div class="dash-chart-title">Aylık İlan Akışı (12 Ay)</div>
+        <canvas id="chart-monthly" height="220"></canvas>
+      </div>
+      <div class="dash-chart-box">
+        <div class="dash-chart-title">Durum Dağılımı</div>
+        <canvas id="chart-status" height="220"></canvas>
+      </div>
+      <div class="dash-chart-box">
+        <div class="dash-chart-title">Tip Dağılımı</div>
+        <canvas id="chart-type" height="220"></canvas>
+      </div>
+      <div class="dash-chart-box">
+        <div class="dash-chart-title">İlçe Dağılımı (Top 10)</div>
+        <canvas id="chart-district" height="220"></canvas>
+      </div>
+      ${isAdmin ? `<div class="dash-chart-box dash-chart-wide">
+        <div class="dash-chart-title">Danışman Performansı</div>
+        <canvas id="chart-agents" height="160"></canvas>
+      </div>` : ''}
+    </div>`;
+
+  // Tüm 12 ay etiketleri
+  const months = buildLast12Months();
+
+  // 1. Aylık grafik
+  const addedMap  = Object.fromEntries((d.monthly_added||[]).map(m=>[m.month,m.count]));
+  const closedMap = Object.fromEntries((d.monthly_closed||[]).map(m=>[m.month,m.count]));
+  _dashCharts.monthly = new Chart(document.getElementById('chart-monthly'), {
+    type: 'bar',
+    data: {
+      labels: months.map(m=>m.label),
+      datasets: [
+        { label:'Eklenen', data: months.map(m=>addedMap[m.key]||0), backgroundColor:'#1565C0cc', borderRadius:4 },
+        { label:'Kapanan', data: months.map(m=>closedMap[m.key]||0), backgroundColor:'#FFD700cc', borderRadius:4 },
+      ]
+    },
+    options: { responsive:true, plugins:{legend:{position:'bottom'}}, scales:{y:{beginAtZero:true,ticks:{stepSize:1}}} }
+  });
+
+  // 2. Durum donut
+  const stLabels = { aktif:'Aktif', satildi:'Satıldı', kiralandi:'Kiralandı', bekliyor:'Bekliyor' };
+  const stColors = { aktif:'#1b5e20', satildi:'#c62828', kiralandi:'#1565C0', bekliyor:'#e65100' };
+  const stKeys = Object.keys(d.by_status||{});
+  _dashCharts.status = new Chart(document.getElementById('chart-status'), {
+    type: 'doughnut',
+    data: {
+      labels: stKeys.map(k=>stLabels[k]||k),
+      datasets:[{ data: stKeys.map(k=>d.by_status[k]), backgroundColor: stKeys.map(k=>stColors[k]||'#90a4ae') }]
+    },
+    options:{ responsive:true, plugins:{legend:{position:'bottom'}} }
+  });
+
+  // 3. Tip dağılımı (pasta)
+  const typeKeys = Object.keys(d.by_type||{}).filter(k=>k&&k!=='—');
+  _dashCharts.type = new Chart(document.getElementById('chart-type'), {
+    type: 'pie',
+    data: {
+      labels: typeKeys,
+      datasets:[{ data: typeKeys.map(k=>d.by_type[k]), backgroundColor:['#1565C0','#FFD700','#1b5e20','#c62828'] }]
+    },
+    options:{ responsive:true, plugins:{legend:{position:'bottom'}} }
+  });
+
+  // 4. İlçe bar
+  const districts = (d.by_district||[]).filter(x=>x.district&&x.district!=='—');
+  _dashCharts.district = new Chart(document.getElementById('chart-district'), {
+    type: 'bar',
+    data: {
+      labels: districts.map(x=>x.district),
+      datasets:[{ label:'İlan', data: districts.map(x=>x.count), backgroundColor:'#1565C0aa', borderRadius:4 }]
+    },
+    options:{ responsive:true, indexAxis:'y', plugins:{legend:{display:false}}, scales:{x:{beginAtZero:true,ticks:{stepSize:1}}} }
+  });
+
+  // 5. Danışman bar (admin only)
+  if (isAdmin && d.top_agents?.length) {
+    _dashCharts.agents = new Chart(document.getElementById('chart-agents'), {
+      type: 'bar',
+      data: {
+        labels: d.top_agents.map(a=>a.name),
+        datasets:[{ label:'İlan', data: d.top_agents.map(a=>a.count), backgroundColor:'#FFD700cc', borderRadius:4 }]
+      },
+      options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{stepSize:1}}} }
+    });
+  }
+}
+
+function buildLast12Months() {
+  const months = [];
+  const now = new Date();
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const label = d.toLocaleDateString('tr-TR', {month:'short', year:'2-digit'});
+    months.push({key, label});
+  }
+  return months;
+}
 
 /* ═══════════════════════════════════════════════════════
    ADMIN
@@ -853,7 +1293,10 @@ async function loadAdminListings(){
       <tbody>${(listings||[]).map(il=>`<tr>
         <td class="muted">${il.listing_no||'—'}</td><td>${il.fields?.title||'—'}</td>
         <td>${il.owner_name||'—'}</td>
-        <td><span class="tag ${il.is_active?'tag-green':'tag-amber'}">${il.is_active?'Aktif':'Pasif'}</span></td>
+        <td>
+          <span class="tag ${il.is_active?'tag-green':'tag-amber'}">${il.is_active?'Aktif':'Pasif'}</span>
+          ${!il.is_listed?'<span class="tag tag-sm" style="background:#eee">Gizli</span>':''}
+        </td>
         <td><button class="btn btn-sm btn-danger" onclick="adminDeleteListing(${il.id})">Sil</button></td>
       </tr>`).join('')}</tbody></table>`;
   }catch(e){showToast(e.message,'error');}

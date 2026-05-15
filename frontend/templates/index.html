@@ -14,6 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,700;1,700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
@@ -54,7 +55,8 @@
     <nav class="nav">
       <button class="nav-btn active" data-page="ilanlar">📋 Portföy</button>
       <button class="nav-btn" data-page="talepler">🎯 Talepler</button>
-      <button class="nav-btn" data-page="gorevler">✅ Görevler</button>
+      <button class="nav-btn" data-page="musteriler">👥 Müşteriler</button>
+      <button class="nav-btn" data-page="dashboard">📊 Dashboard</button>
       <button class="nav-btn admin-only" data-page="admin" style="display:none">🔧 Admin</button>
     </nav>
     <div class="hdr-right">
@@ -101,11 +103,19 @@
       <div class="talep-list" id="talep-list"></div>
     </div>
 
-    <!-- GÖREVLER -->
-    <div class="page" id="page-gorevler">
-      <div class="empty-state">
-        <div class="big-icon">✅</div>
-        <p>Görevler yakında burada!</p>
+    <!-- MÜŞTERİLER (CRM) -->
+    <div class="page" id="page-musteriler">
+      <div class="toolbar">
+        <input type="text" id="musteri-search" placeholder="🔍 Müşteri ara..." class="toolbar-search">
+        <button class="btn btn-gold btn-sm" style="margin-left:auto" id="yeni-musteri-btn">+ Müşteri Ekle</button>
+      </div>
+      <div id="musteri-list" class="crm-list"></div>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div class="page" id="page-dashboard">
+      <div id="dash-content">
+        <div class="empty-state"><div class="big-icon">📊</div><p>Yükleniyor...</p></div>
       </div>
     </div>
 
@@ -136,6 +146,7 @@
     <div class="modal-header">
       <h3 id="detail-title">İlan Detayı</h3>
       <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-outline btn-sm" id="detail-history-btn">📋 Tarihçe</button>
         <button class="btn btn-outline btn-sm" id="detail-share-btn">🔗 Paylaş</button>
         <button class="btn btn-blue btn-sm" id="detail-edit-btn">✏️ Düzenle</button>
         <button class="close-btn" id="close-detail">×</button>
@@ -190,6 +201,44 @@
   </div>
 </div>
 
+<!-- PASİF YAPMA MODAL -->
+<div class="overlay" id="passive-overlay">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h3>Pasife Alınıyor</h3>
+      <button class="close-btn" id="close-passive-modal">×</button>
+    </div>
+    <p class="passive-desc" id="passive-listing-name" style="color:var(--muted);font-size:13px;margin-bottom:16px"></p>
+    <div class="form-group">
+      <label>Durum</label>
+      <div class="status-btn-group">
+        <button class="status-opt" data-val="bekliyor">⏳ Bekliyor</button>
+        <button class="status-opt status-opt-sel" data-val="satildi">🏷️ Satıldı</button>
+        <button class="status-opt" data-val="kiralandi">🔑 Kiralandı</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Kapanış Fiyatı <span class="muted">(opsiyonel)</span></label>
+      <input id="passive-price" type="text" inputmode="numeric" placeholder="Örn: 2.500.000" oninput="formatPriceInput(this)">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="passive-iptal-btn">İptal</button>
+      <button class="btn btn-blue" id="passive-kaydet-btn">Pasife Al</button>
+    </div>
+  </div>
+</div>
+
+<!-- TARİHÇE MODAL -->
+<div class="overlay" id="history-overlay">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h3>İlan Tarihçesi</h3>
+      <button class="close-btn" id="close-history-modal">×</button>
+    </div>
+    <div id="history-content"></div>
+  </div>
+</div>
+
 <!-- TALEP MODAL -->
 <div class="overlay" id="talep-overlay">
   <div class="modal">
@@ -201,6 +250,72 @@
     <div class="modal-footer">
       <button class="btn btn-outline" id="talep-iptal-btn">İptal</button>
       <button class="btn btn-blue" id="talep-kaydet-btn">💾 Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<!-- MÜŞTERİ MODAL -->
+<div class="overlay" id="musteri-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="musteri-modal-title">Yeni Müşteri</h3>
+      <button class="close-btn" id="close-musteri-modal">×</button>
+    </div>
+    <div class="form-group"><label>Ad Soyad <span class="req">*</span></label><input id="m-name" type="text" placeholder="Ahmet Yılmaz"></div>
+    <div class="form-group"><label>Telefon</label><input id="m-phone" type="tel" placeholder="0532 000 00 00"></div>
+    <div class="form-group"><label>E-posta</label><input id="m-email" type="email" placeholder="ahmet@mail.com"></div>
+    <div class="form-group">
+      <label>Kaynak</label>
+      <select id="m-source">
+        <option value="">Seçin...</option>
+        <option>Telefon</option><option>Referans</option><option>Web</option>
+        <option>Instagram</option><option>Sahibinden</option><option>Diğer</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Notlar</label><textarea id="m-notes" rows="3" placeholder="Müşteri hakkında notlar..."></textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="musteri-iptal-btn">İptal</button>
+      <button class="btn btn-blue" id="musteri-kaydet-btn">💾 Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<!-- MÜŞTERİ DETAY MODAL -->
+<div class="overlay" id="musteri-detail-overlay">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <h3 id="musteri-detail-name">Müşteri Detayı</h3>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-blue btn-sm" id="musteri-detail-edit-btn">✏️ Düzenle</button>
+        <button class="close-btn" id="close-musteri-detail">×</button>
+      </div>
+    </div>
+    <div id="musteri-detail-content"></div>
+    <div style="margin-top:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <b style="font-size:14px">Bağlı İlanlar</b>
+        <button class="btn btn-sm btn-outline" id="link-listing-btn">+ İlan Bağla</button>
+      </div>
+      <div id="musteri-listings-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- İLAN BAĞLA MODAL -->
+<div class="overlay" id="link-listing-overlay">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h3>İlan Bağla</h3>
+      <button class="close-btn" id="close-link-listing">×</button>
+    </div>
+    <div class="form-group">
+      <label>İlan Seç</label>
+      <select id="link-listing-select"><option value="">Seçin...</option></select>
+    </div>
+    <div class="form-group"><label>Not</label><input id="link-listing-note" type="text" placeholder="Opsiyonel not"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="link-listing-iptal">İptal</button>
+      <button class="btn btn-blue" id="link-listing-kaydet">Bağla</button>
     </div>
   </div>
 </div>
@@ -228,7 +343,6 @@
 <script src="/static/js/api.js"></script>
 <script src="/static/js/app.js"></script>
 <script>
-// PWA Service Worker kaydı
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/static/sw.js')

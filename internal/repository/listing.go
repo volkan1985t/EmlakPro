@@ -18,8 +18,8 @@ func NewListingRepository(db *sql.DB) *ListingRepository {
 }
 
 type ListFilter struct {
-	UserID       int64  // 0 = herkese görünen ilanlar
-	OnlyMine     bool   // sadece kendi ilanları
+	UserID       int64
+	OnlyMine     bool
 	ListingType  string
 	PropertyType string
 	District     string
@@ -28,26 +28,47 @@ type ListFilter struct {
 	IsAdmin      bool
 }
 
+const listingSelectCols = `
+	l.id, l.listing_no, l.user_id, l.share_token, l.is_active, l.is_listed,
+	l.status, l.closing_price, l.cover_image, l.fields, l.created_at, l.updated_at,
+	u.full_name as owner_name`
+
+func scanListing(row interface {
+	Scan(...interface{}) error
+}) (*model.Listing, error) {
+	var l model.Listing
+	var fieldsJSON []byte
+	var token string
+	err := row.Scan(
+		&l.ID, &l.ListingNo, &l.UserID, &token, &l.IsActive, &l.IsListed,
+		&l.Status, &l.ClosingPrice, &l.CoverImage, &fieldsJSON,
+		&l.CreatedAt, &l.UpdatedAt, &l.OwnerName,
+	)
+	if err != nil { return nil, err }
+	l.ShareToken = token
+	if err := json.Unmarshal(fieldsJSON, &l.Fields); err != nil {
+		l.Fields = map[string]string{}
+	}
+	return &l, nil
+}
+
 func (r *ListingRepository) List(f ListFilter) ([]model.Listing, error) {
 	args  := []interface{}{}
 	where := []string{}
 	i := 1
 
 	if f.OnlyMine && f.UserID > 0 {
-		// Sadece kendi ilanları (aktif + pasif)
 		where = append(where, fmt.Sprintf("l.user_id = $%d", i))
-		args = append(args, f.UserID)
-		i++
+		args = append(args, f.UserID); i++
 	} else if f.IsAdmin {
-		// Admin hepsini görür
+		// Admin hepsini görür, kısıt yok
 	} else {
-		// Normal listeleme: aktif ilanlar herkese + pasif ilanlar sadece sahibine
+		// Normal: aktif+listelenen ilanlar + sahibine ait tüm ilanlar
 		if f.UserID > 0 {
-			where = append(where, fmt.Sprintf("(l.is_active = true OR l.user_id = $%d)", i))
-			args = append(args, f.UserID)
-			i++
+			where = append(where, fmt.Sprintf("((l.is_active = true AND l.is_listed = true) OR l.user_id = $%d)", i))
+			args = append(args, f.UserID); i++
 		} else {
-			where = append(where, "l.is_active = true")
+			where = append(where, "l.is_active = true AND l.is_listed = true")
 		}
 	}
 
@@ -80,80 +101,48 @@ func (r *ListingRepository) List(f ListFilter) ([]model.Listing, error) {
 	}
 
 	query := fmt.Sprintf(`
-		SELECT l.id, l.listing_no, l.user_id, l.share_token, l.is_active,
-		       l.cover_image, l.fields, l.created_at, l.updated_at,
-		       u.full_name as owner_name
+		SELECT %s
 		FROM listings l
 		JOIN users u ON u.id = l.user_id
 		%s
-		ORDER BY l.created_at DESC`, whereClause)
+		ORDER BY l.created_at DESC`, listingSelectCols, whereClause)
 
 	rows, err := r.db.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
+	if err != nil { return nil, err }
 	defer rows.Close()
 
 	var listings []model.Listing
 	for rows.Next() {
-		var l model.Listing
-		var fieldsJSON []byte
-		var token string
-		if err := rows.Scan(
-			&l.ID, &l.ListingNo, &l.UserID, &token, &l.IsActive,
-			&l.CoverImage, &fieldsJSON, &l.CreatedAt, &l.UpdatedAt,
-			&l.OwnerName,
-		); err != nil {
-			return nil, err
-		}
-		l.ShareToken = token
-		if err := json.Unmarshal(fieldsJSON, &l.Fields); err != nil {
-			l.Fields = map[string]string{}
-		}
+		l, err := scanListing(rows)
+		if err != nil { return nil, err }
 		l.Images, _ = r.getImages(l.ID)
-		listings = append(listings, l)
+		listings = append(listings, *l)
 	}
 	return listings, nil
 }
 
 func (r *ListingRepository) GetByID(id int64) (*model.Listing, error) {
-	l := &model.Listing{}
-	var fieldsJSON []byte
-	var token string
-	err := r.db.QueryRow(`
-		SELECT l.id, l.listing_no, l.user_id, l.share_token, l.is_active,
-		       l.cover_image, l.fields, l.created_at, l.updated_at,
-		       u.full_name as owner_name
+	row := r.db.QueryRow(fmt.Sprintf(`
+		SELECT %s
 		FROM listings l
 		JOIN users u ON u.id = l.user_id
-		WHERE l.id = $1`, id,
-	).Scan(&l.ID, &l.ListingNo, &l.UserID, &token, &l.IsActive,
-		&l.CoverImage, &fieldsJSON, &l.CreatedAt, &l.UpdatedAt, &l.OwnerName)
+		WHERE l.id = $1`, listingSelectCols), id)
+	l, err := scanListing(row)
 	if err == sql.ErrNoRows { return nil, nil }
 	if err != nil { return nil, err }
-	l.ShareToken = token
-	json.Unmarshal(fieldsJSON, &l.Fields)
 	l.Images, _ = r.getImages(l.ID)
 	return l, nil
 }
 
 func (r *ListingRepository) GetByShareToken(token string) (*model.Listing, error) {
-	l := &model.Listing{}
-	var fieldsJSON []byte
-	var tok string
-	err := r.db.QueryRow(`
-		SELECT l.id, l.listing_no, l.user_id, l.share_token, l.is_active,
-		       l.cover_image, l.fields, l.created_at, l.updated_at,
-		       u.full_name as owner_name
+	row := r.db.QueryRow(fmt.Sprintf(`
+		SELECT %s
 		FROM listings l
 		JOIN users u ON u.id = l.user_id
-		WHERE l.share_token = $1 AND l.is_active = true`, token,
-	).Scan(&l.ID, &l.ListingNo, &l.UserID, &tok, &l.IsActive,
-		&l.CoverImage, &fieldsJSON, &l.CreatedAt, &l.UpdatedAt, &l.OwnerName)
+		WHERE l.share_token = $1 AND l.is_active = true`, listingSelectCols), token)
+	l, err := scanListing(row)
 	if err == sql.ErrNoRows { return nil, nil }
 	if err != nil { return nil, err }
-	l.ShareToken = tok
-	json.Unmarshal(fieldsJSON, &l.Fields)
 	l.Images, _ = r.getImages(l.ID)
 	return l, nil
 }
@@ -164,9 +153,9 @@ func (r *ListingRepository) Create(l *model.Listing) error {
 	return r.db.QueryRow(`
 		INSERT INTO listings (user_id, cover_image, fields)
 		VALUES ($1,$2,$3)
-		RETURNING id, listing_no, share_token, created_at, updated_at`,
+		RETURNING id, listing_no, share_token, is_listed, status, created_at, updated_at`,
 		l.UserID, l.CoverImage, fieldsJSON,
-	).Scan(&l.ID, &l.ListingNo, &l.ShareToken, &l.CreatedAt, &l.UpdatedAt)
+	).Scan(&l.ID, &l.ListingNo, &l.ShareToken, &l.IsListed, &l.Status, &l.CreatedAt, &l.UpdatedAt)
 }
 
 func (r *ListingRepository) Update(l *model.Listing) error {
@@ -178,15 +167,33 @@ func (r *ListingRepository) Update(l *model.Listing) error {
 	return err
 }
 
-func (r *ListingRepository) ToggleActive(id, userID int64, isAdmin bool) error {
+// ToggleActive — status ve closing_price pasife alınırken set edilir, aktife alınırken reset
+func (r *ListingRepository) ToggleActive(id, userID int64, isAdmin bool, status string, closingPrice *int64) error {
 	var err error
 	if isAdmin {
-		_, err = r.db.Exec(
-			`UPDATE listings SET is_active = NOT is_active, updated_at=NOW() WHERE id=$1`, id)
+		_, err = r.db.Exec(`
+			UPDATE listings
+			SET is_active = NOT is_active, status = $2, closing_price = $3, updated_at = NOW()
+			WHERE id = $1`, id, status, closingPrice)
 	} else {
-		_, err = r.db.Exec(
-			`UPDATE listings SET is_active = NOT is_active, updated_at=NOW()
-			 WHERE id=$1 AND user_id=$2`, id, userID)
+		_, err = r.db.Exec(`
+			UPDATE listings
+			SET is_active = NOT is_active, status = $2, closing_price = $3, updated_at = NOW()
+			WHERE id = $1 AND user_id = $4`, id, status, closingPrice, userID)
+	}
+	return err
+}
+
+// ToggleListed — anasayfada görünürlük (is_listed)
+func (r *ListingRepository) ToggleListed(id, userID int64, isAdmin bool) error {
+	var err error
+	if isAdmin {
+		_, err = r.db.Exec(`
+			UPDATE listings SET is_listed = NOT is_listed, updated_at = NOW() WHERE id = $1`, id)
+	} else {
+		_, err = r.db.Exec(`
+			UPDATE listings SET is_listed = NOT is_listed, updated_at = NOW()
+			WHERE id = $1 AND user_id = $2`, id, userID)
 	}
 	return err
 }
@@ -239,4 +246,36 @@ func (r *ListingRepository) getImages(listingID int64) ([]model.ListingImage, er
 		images = append(images, img)
 	}
 	return images, nil
+}
+
+// ── Tarihçe ──────────────────────────────────────────────────
+
+func (r *ListingRepository) AddHistory(listingID, userID int64, action, status string, closingPrice *int64) {
+	r.db.Exec(`
+		INSERT INTO listing_history (listing_id, user_id, action, status, closing_price)
+		VALUES ($1, $2, $3, $4, $5)`,
+		listingID, userID, action, status, closingPrice)
+}
+
+func (r *ListingRepository) GetHistory(listingID int64) ([]model.ListingHistory, error) {
+	rows, err := r.db.Query(`
+		SELECT h.id, h.listing_id, h.user_id, h.action,
+		       COALESCE(h.status,''), COALESCE(h.note,''), h.created_at,
+		       u.full_name, h.closing_price
+		FROM listing_history h
+		JOIN users u ON u.id = h.user_id
+		WHERE h.listing_id = $1
+		ORDER BY h.created_at DESC`, listingID)
+	if err != nil { return nil, err }
+	defer rows.Close()
+	var history []model.ListingHistory
+	for rows.Next() {
+		var h model.ListingHistory
+		if err := rows.Scan(&h.ID, &h.ListingID, &h.UserID, &h.Action,
+			&h.Status, &h.Note, &h.CreatedAt, &h.UserName, &h.ClosingPrice); err != nil {
+			return nil, err
+		}
+		history = append(history, h)
+	}
+	return history, nil
 }

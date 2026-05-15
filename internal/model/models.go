@@ -21,17 +21,20 @@ type User struct {
 }
 
 type Listing struct {
-	ID         int64             `json:"id" db:"id"`
-	ListingNo  int64             `json:"listing_no" db:"listing_no"`
-	UserID     int64             `json:"user_id" db:"user_id"`
-	ShareToken string            `json:"share_token" db:"share_token"`
-	IsActive   bool              `json:"is_active" db:"is_active"`
-	CoverImage string            `json:"cover_image" db:"cover_image"`
-	Fields     map[string]string `json:"fields" db:"fields"`
-	CreatedAt  time.Time         `json:"created_at" db:"created_at"`
-	UpdatedAt  time.Time         `json:"updated_at" db:"updated_at"`
-	OwnerName  string            `json:"owner_name,omitempty" db:"owner_name"`
-	Images     []ListingImage    `json:"images,omitempty"`
+	ID           int64             `json:"id" db:"id"`
+	ListingNo    int64             `json:"listing_no" db:"listing_no"`
+	UserID       int64             `json:"user_id" db:"user_id"`
+	ShareToken   string            `json:"share_token" db:"share_token"`
+	IsActive     bool              `json:"is_active" db:"is_active"`
+	IsListed     bool              `json:"is_listed" db:"is_listed"`
+	Status       string            `json:"status" db:"status"`
+	ClosingPrice *int64            `json:"closing_price,omitempty" db:"closing_price"`
+	CoverImage   string            `json:"cover_image" db:"cover_image"`
+	Fields       map[string]string `json:"fields" db:"fields"`
+	CreatedAt    time.Time         `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time         `json:"updated_at" db:"updated_at"`
+	OwnerName    string            `json:"owner_name,omitempty" db:"owner_name"`
+	Images       []ListingImage    `json:"images,omitempty"`
 }
 
 func (l *Listing) Field(key string) string {
@@ -45,6 +48,18 @@ type ListingImage struct {
 	Path      string    `json:"path" db:"path"`
 	SortOrder int       `json:"sort_order" db:"sort_order"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
+}
+
+type ListingHistory struct {
+	ID           int64     `json:"id"`
+	ListingID    int64     `json:"listing_id"`
+	UserID       int64     `json:"user_id"`
+	Action       string    `json:"action"`
+	Status       string    `json:"status"`
+	ClosingPrice *int64    `json:"closing_price,omitempty"`
+	Note         string    `json:"note"`
+	CreatedAt    time.Time `json:"created_at"`
+	UserName     string    `json:"user_name"`
 }
 
 type Request struct {
@@ -64,12 +79,66 @@ func (r *Request) Field(key string) string {
 	return r.Fields[key]
 }
 
+type Customer struct {
+	ID        int64     `json:"id"`
+	UserID    int64     `json:"user_id"`
+	Name      string    `json:"name"`
+	Phone     string    `json:"phone"`
+	Email     string    `json:"email"`
+	Source    string    `json:"source"`
+	Notes     string    `json:"notes"`
+	IsActive  bool      `json:"is_active"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	OwnerName string    `json:"owner_name,omitempty"`
+	// Linked listings (populated on demand)
+	Listings []Listing `json:"listings,omitempty"`
+}
+
+type CustomerListing struct {
+	ID         int64     `json:"id"`
+	CustomerID int64     `json:"customer_id"`
+	ListingID  int64     `json:"listing_id"`
+	Note       string    `json:"note"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 type RefreshToken struct {
 	ID        int64     `db:"id"`
 	UserID    int64     `db:"user_id"`
 	Token     string    `db:"token"`
 	ExpiresAt time.Time `db:"expires_at"`
 	CreatedAt time.Time `db:"created_at"`
+}
+
+// ── Dashboard ────────────────────────────────────────────────
+type DashboardStats struct {
+	TotalListings    int                      `json:"total_listings"`
+	ActiveListings   int                      `json:"active_listings"`
+	PassiveListings  int                      `json:"passive_listings"`
+	ListedListings   int                      `json:"listed_listings"`
+	UnlistedListings int                      `json:"unlisted_listings"`
+	ByStatus         map[string]int           `json:"by_status"`
+	ByType           map[string]int           `json:"by_type"`
+	ByDistrict       []DistrictCount          `json:"by_district"`
+	MonthlyAdded     []MonthlyCount           `json:"monthly_added"`
+	MonthlyClosed    []MonthlyCount           `json:"monthly_closed"`
+	TopAgents        []AgentCount             `json:"top_agents"`
+}
+
+type DistrictCount struct {
+	District string `json:"district"`
+	Count    int    `json:"count"`
+}
+
+type MonthlyCount struct {
+	Month string `json:"month"`
+	Count int    `json:"count"`
+}
+
+type AgentCount struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
 }
 
 // ── API ──────────────────────────────────────────────────────
@@ -103,9 +172,24 @@ type UpdateListingRequest struct {
 	Images       []string          `json:"images"`
 	RemoveImages []int64           `json:"remove_images"`
 }
+type ToggleActiveRequest struct {
+	Status       string `json:"status"`
+	ClosingPrice *int64 `json:"closing_price"`
+}
 type CreateRequestPayload struct {
 	Fields   map[string]string `json:"fields"`
 	NotifyMe bool              `json:"notify_me"`
+}
+type CreateCustomerRequest struct {
+	Name   string `json:"name"`
+	Phone  string `json:"phone"`
+	Email  string `json:"email"`
+	Source string `json:"source"`
+	Notes  string `json:"notes"`
+}
+type LinkListingRequest struct {
+	ListingID int64  `json:"listing_id"`
+	Note      string `json:"note"`
 }
 type APIResponse struct {
 	Success bool        `json:"success"`
