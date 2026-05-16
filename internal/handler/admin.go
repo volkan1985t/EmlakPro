@@ -26,6 +26,26 @@ func NewAdminHandler(cfg *config.Config, userRepo *repository.UserRepository,
 
 // ── Kullanıcı Yönetimi ────────────────────────────────────────────────────────
 
+// GET /api/users — basic list for assignee pickers (authenticated only)
+func (h *AdminHandler) ListUsersBasic(w http.ResponseWriter, r *http.Request) {
+	users, err := h.userRepo.List()
+	if err != nil {
+		jsonErr(w, "Kullanıcılar yüklenemedi", http.StatusInternalServerError)
+		return
+	}
+	type basicUser struct {
+		ID       int64  `json:"id"`
+		FullName string `json:"full_name"`
+	}
+	out := make([]basicUser, 0, len(users))
+	for _, u := range users {
+		if u.IsActive {
+			out = append(out, basicUser{u.ID, u.FullName})
+		}
+	}
+	jsonOK(w, out)
+}
+
 // GET /api/admin/users
 func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := h.userRepo.List()
@@ -87,12 +107,13 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := &model.User{
-		Username:     req.Username,
-		Email:        req.Email,
-		PasswordHash: string(hash),
-		FullName:     req.FullName,
-		Role:         role,
-		IsActive:     true,
+		Username:       req.Username,
+		Email:          req.Email,
+		PasswordHash:   string(hash),
+		FullName:       req.FullName,
+		Role:           role,
+		IsActive:       true,
+		TelegramChatID: req.TelegramChatID,
 	}
 	if err := h.userRepo.Create(user); err != nil {
 		jsonErr(w, "Kullanıcı oluşturulamadı", http.StatusInternalServerError)
@@ -101,6 +122,24 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	user.PasswordHash = ""
 	w.WriteHeader(http.StatusCreated)
 	jsonOK(w, user)
+}
+
+// PATCH /api/admin/users/{id}/chatid
+func (h *AdminHandler) SetTelegramChatID(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, "Geçersiz ID", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		ChatID string `json:"telegram_chat_id"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	if err := h.userRepo.SetTelegramChatID(id, body.ChatID); err != nil {
+		jsonErr(w, "Chat ID güncellenemedi", http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]string{"message": "Chat ID güncellendi"})
 }
 
 // PATCH /api/admin/users/{id}/toggle

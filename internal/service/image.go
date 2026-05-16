@@ -161,6 +161,9 @@ func (s *ImageService) DeleteImage(filePath string) error {
 	return nil
 }
 
+// DeleteFile — alias for DeleteImage used by task handler
+func (s *ImageService) DeleteFile(path string) { s.DeleteImage(path) }
+
 // PathToURL — dosya yolunu public URL'e çevirir
 func (s *ImageService) PathToURL(filePath string) string {
 	if filePath == "" {

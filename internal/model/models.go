@@ -9,15 +9,16 @@ const (
 )
 
 type User struct {
-	ID           int64     `json:"id" db:"id"`
-	Username     string    `json:"username" db:"username"`
-	Email        string    `json:"email" db:"email"`
-	PasswordHash string    `json:"-" db:"password_hash"`
-	FullName     string    `json:"full_name" db:"full_name"`
-	Role         Role      `json:"role" db:"role"`
-	IsActive     bool      `json:"is_active" db:"is_active"`
-	CreatedAt    time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+	ID             int64     `json:"id" db:"id"`
+	Username       string    `json:"username" db:"username"`
+	Email          string    `json:"email" db:"email"`
+	PasswordHash   string    `json:"-" db:"password_hash"`
+	FullName       string    `json:"full_name" db:"full_name"`
+	Role           Role      `json:"role" db:"role"`
+	IsActive       bool      `json:"is_active" db:"is_active"`
+	TelegramChatID string    `json:"telegram_chat_id,omitempty" db:"telegram_chat_id"`
+	CreatedAt      time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type Listing struct {
@@ -155,11 +156,12 @@ type RefreshRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 type CreateUserRequest struct {
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	FullName string `json:"full_name"`
-	Role     Role   `json:"role"`
+	Username       string `json:"username"`
+	Email          string `json:"email"`
+	Password       string `json:"password"`
+	FullName       string `json:"full_name"`
+	Role           Role   `json:"role"`
+	TelegramChatID string `json:"telegram_chat_id"`
 }
 type CreateListingRequest struct {
 	Fields     map[string]string `json:"fields"`
@@ -191,6 +193,73 @@ type LinkListingRequest struct {
 	ListingID int64  `json:"listing_id"`
 	Note      string `json:"note"`
 }
+// ── Tasks ────────────────────────────────────────────────────
+type Task struct {
+	ID          int64      `json:"id"`
+	ParentID    *int64     `json:"parent_id,omitempty"`
+	Title       string     `json:"title"`
+	Description string     `json:"description"`
+	Status      string     `json:"status"`
+	Priority    string     `json:"priority"`
+	DueDate     *time.Time `json:"due_date,omitempty"`
+	CreatedBy   int64      `json:"created_by"`
+	CreatorName string     `json:"creator_name,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	Assignees   []TaskUser    `json:"assignees,omitempty"`
+	Comments    []TaskComment `json:"comments,omitempty"`
+	Images      []TaskImage   `json:"images,omitempty"`
+	Subtasks    []Task        `json:"subtasks,omitempty"`
+}
+
+type TaskUser struct {
+	ID       int64  `json:"id"`
+	FullName string `json:"full_name"`
+}
+
+type TaskComment struct {
+	ID        int64     `json:"id"`
+	TaskID    int64     `json:"task_id"`
+	UserID    int64     `json:"user_id"`
+	UserName  string    `json:"user_name"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type TaskImage struct {
+	ID         int64     `json:"id"`
+	TaskID     int64     `json:"task_id"`
+	Path       string    `json:"path"`
+	UploadedBy int64     `json:"uploaded_by"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type CreateTaskRequest struct {
+	ParentID    *int64     `json:"parent_id"`
+	Title       string     `json:"title"`
+	Description string     `json:"description"`
+	Status      string     `json:"status"`
+	Priority    string     `json:"priority"`
+	DueDate     *time.Time `json:"due_date"`
+	Assignees   []int64    `json:"assignees"`
+}
+
+type UpdateTaskRequest struct {
+	Title       string     `json:"title"`
+	Description string     `json:"description"`
+	Status      string     `json:"status"`
+	Priority    string     `json:"priority"`
+	DueDate     *time.Time `json:"due_date"`
+	Assignees   []int64    `json:"assignees"`
+}
+
+type TaskFilter struct {
+	Status   string
+	Priority string
+	UserID   int64
+	ParentID *int64
+}
+
 type APIResponse struct {
 	Success bool        `json:"success"`
 	Data    interface{} `json:"data,omitempty"`

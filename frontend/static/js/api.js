@@ -95,6 +95,9 @@ const API = (() => {
   // ── Config ────────────────────────────────────────────────
   async function getConfig() { return request('GET', '/config'); }
 
+  // ── Kullanıcı listesi (atama için) ────────────────────────
+  async function getUsers() { return request('GET', '/users'); }
+
   // ── İlanlar ───────────────────────────────────────────────
   async function getListings(params = {}) {
     const q = new URLSearchParams(params).toString();
@@ -151,6 +154,30 @@ const API = (() => {
   // ── Dashboard ─────────────────────────────────────────────
   async function getDashboard() { return request('GET', '/dashboard'); }
 
+  // ── Görevler (Tasks) ──────────────────────────────────────
+  async function getTasks(params = {}) {
+    const q = new URLSearchParams(params).toString();
+    return request('GET', '/tasks' + (q ? '?' + q : ''));
+  }
+  async function getTask(id)            { return request('GET',    '/tasks/' + id); }
+  async function createTask(data)       { return request('POST',   '/tasks', data); }
+  async function updateTask(id, data)   { return request('PUT',    '/tasks/' + id, data); }
+  async function updateTaskStatus(id, status) {
+    return request('PATCH', '/tasks/' + id + '/status', { status });
+  }
+  async function deleteTask(id)         { return request('DELETE', '/tasks/' + id); }
+  async function addTaskComment(id, body)  { return request('POST', '/tasks/' + id + '/comments', { body }); }
+  async function deleteTaskComment(taskId, cid) {
+    return request('DELETE', '/tasks/' + taskId + '/comments/' + cid);
+  }
+  async function uploadTaskImage(taskId, file) {
+    const fd = new FormData(); fd.append('image', file);
+    return request('POST', '/tasks/' + taskId + '/images', fd, true);
+  }
+  async function deleteTaskImage(taskId, imgId) {
+    return request('DELETE', '/tasks/' + taskId + '/images/' + imgId);
+  }
+
   // ── Admin ─────────────────────────────────────────────────
   async function adminGetUsers()        { return request('GET',    '/admin/users'); }
   async function adminCreateUser(data)  { return request('POST',   '/admin/users', data); }
@@ -160,10 +187,13 @@ const API = (() => {
   async function adminDeleteListing(id) { return request('DELETE', '/admin/listings/' + id); }
   async function adminGetRequests()     { return request('GET',    '/admin/requests'); }
   async function adminDeleteRequest(id) { return request('DELETE', '/admin/requests/' + id); }
+  async function adminSetChatID(id, chatID) {
+    return request('PATCH', '/admin/users/' + id + '/chatid', { telegram_chat_id: chatID });
+  }
 
   return {
     login, logout, getUser, getUserID, isAdmin, isLoggedIn, validateSession,
-    getConfig,
+    getConfig, getUsers,
     getListings, getListing, getListingByToken,
     createListing, updateListing, toggleListing, toggleListingListed,
     getListingHistory, deleteListingImage,
@@ -172,8 +202,10 @@ const API = (() => {
     getCustomers, createCustomer, updateCustomer, toggleCustomer, deleteCustomer,
     getCustomerListings, linkListing, unlinkListing,
     getDashboard,
-    adminGetUsers, adminCreateUser, adminToggleUser, adminDeleteUser,
+    adminGetUsers, adminCreateUser, adminToggleUser, adminDeleteUser, adminSetChatID,
     adminGetListings, adminDeleteListing,
     adminGetRequests, adminDeleteRequest,
+    getTasks, getTask, createTask, updateTask, updateTaskStatus, deleteTask,
+    addTaskComment, deleteTaskComment, uploadTaskImage, deleteTaskImage,
   };
 })();

@@ -53,13 +53,16 @@ func main() {
 	listingRepo  := repository.NewListingRepository(db)
 	requestRepo  := repository.NewRequestRepository(db)
 	customerRepo := repository.NewCustomerRepository(db)
+	taskRepo     := repository.NewTaskRepository(db)
 
 	tokenSvc := auth.NewTokenService(
 		cfg.Auth.JWTSecret,
 		cfg.Auth.AccessTokenTTLMins,
 		cfg.Auth.RefreshTokenTTLDays,
 	)
-	imageSvc := service.NewImageService(cfg)
+	imageSvc  := service.NewImageService(cfg)
+	telegramSvc := service.NewTelegramService(&cfg.Telegram, userRepo)
+	telegramSvc.StartPolling()
 
 	if err := ensureAdmin(cfg, userRepo); err != nil {
 		log.Fatalf("Admin oluşturulamadı: %v", err)
@@ -75,6 +78,7 @@ func main() {
 	configHandler    := handler.NewConfigHandler(cfg)
 	customerHandler  := handler.NewCustomerHandler(cfg, customerRepo, listingRepo, imageSvc)
 	dashboardHandler := handler.NewDashboardHandler(db)
+	taskHandler      := handler.NewTaskHandler(taskRepo, imageSvc, telegramSvc)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -111,6 +115,7 @@ func main() {
 
 			r.Post("/auth/logout", authHandler.Logout)
 			r.Get("/auth/me",     authHandler.Me)
+			r.Get("/users",       adminHandler.ListUsersBasic)
 
 			// İlanlar
 			r.Get("/listings",                           listingHandler.List)
@@ -146,17 +151,30 @@ func main() {
 			// Dashboard
 			r.Get("/dashboard", dashboardHandler.Stats)
 
+			// Görevler (Tasks)
+			r.Get("/tasks",                                taskHandler.List)
+			r.Post("/tasks",                               taskHandler.Create)
+			r.Get("/tasks/{id}",                           taskHandler.GetByID)
+			r.Put("/tasks/{id}",                           taskHandler.Update)
+			r.Patch("/tasks/{id}/status",                  taskHandler.UpdateStatus)
+			r.Delete("/tasks/{id}",                        taskHandler.Delete)
+			r.Post("/tasks/{id}/comments",                 taskHandler.AddComment)
+			r.Delete("/tasks/{id}/comments/{cid}",         taskHandler.DeleteComment)
+			r.Post("/tasks/{id}/images",                   taskHandler.UploadImage)
+			r.Delete("/tasks/{id}/images/{imgID}",         taskHandler.DeleteImage)
+
 			// Admin
 			r.Group(func(r chi.Router) {
 				r.Use(authMW.RequireAdmin)
-				r.Get("/admin/users",               adminHandler.ListUsers)
-				r.Post("/admin/users",              adminHandler.CreateUser)
-				r.Patch("/admin/users/{id}/toggle", adminHandler.ToggleUser)
-				r.Delete("/admin/users/{id}",       adminHandler.DeleteUser)
-				r.Get("/admin/listings",            adminHandler.AllListings)
-				r.Delete("/admin/listings/{id}",    adminHandler.DeleteListing)
-				r.Get("/admin/requests",            adminHandler.AllRequests)
-				r.Delete("/admin/requests/{id}",    adminHandler.DeleteRequest)
+				r.Get("/admin/users",                 adminHandler.ListUsers)
+				r.Post("/admin/users",                adminHandler.CreateUser)
+				r.Patch("/admin/users/{id}/toggle",   adminHandler.ToggleUser)
+				r.Patch("/admin/users/{id}/chatid",   adminHandler.SetTelegramChatID)
+				r.Delete("/admin/users/{id}",         adminHandler.DeleteUser)
+				r.Get("/admin/listings",              adminHandler.AllListings)
+				r.Delete("/admin/listings/{id}",      adminHandler.DeleteListing)
+				r.Get("/admin/requests",              adminHandler.AllRequests)
+				r.Delete("/admin/requests/{id}",      adminHandler.DeleteRequest)
 			})
 		})
 	})

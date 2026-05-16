@@ -126,6 +126,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     if (this.dataset.page==='admin')      loadAdminPanel();
     if (this.dataset.page==='musteriler') loadCustomers();
     if (this.dataset.page==='dashboard')  loadDashboard();
+    if (this.dataset.page==='gorevler')   loadTasks();
   });
 });
 document.querySelectorAll('.admin-tab').forEach(btn => {
@@ -1257,6 +1258,430 @@ function buildLast12Months() {
     months.push({key, label});
   }
   return months;
+}
+
+/* ═══════════════════════════════════════════════════════
+   GÖREVLER (Tasks)
+════════════════════════════════════════════════════════ */
+state.tasks       = [];
+state.allUsers    = [];
+state.taskView    = 'kanban'; // 'kanban' | 'list'
+state.editTaskId  = null;
+state.viewTaskId  = null;
+state.taskParentId = null;
+
+const PRIORITY_LABEL = { dusuk:'Düşük', normal:'Normal', yuksek:'Yüksek', acil:'Acil' };
+const PRIORITY_CLASS = { dusuk:'prio-dusuk', normal:'prio-normal', yuksek:'prio-yuksek', acil:'prio-acil' };
+const STATUS_TASK_LABEL = { bekliyor:'Bekliyor', devam_ediyor:'Devam Ediyor', tamamlandi:'Tamamlandı', iptal:'İptal' };
+const STATUS_TASK_CLASS = { bekliyor:'status-bekliyor', devam_ediyor:'status-devam', tamamlandi:'status-tamamlandi', iptal:'status-iptal' };
+
+async function loadTasks() {
+  const params = {};
+  const sf = document.getElementById('task-status-filter')?.value;
+  const pf = document.getElementById('task-priority-filter')?.value;
+  if (sf) params.status   = sf;
+  if (pf) params.priority = pf;
+  try {
+    state.tasks = await API.getTasks(params) || [];
+    renderTasks();
+  } catch(e) { showToast('Görevler yüklenemedi: '+e.message,'error'); }
+}
+
+async function ensureUsers() {
+  if (!state.allUsers.length) {
+    state.allUsers = await API.getUsers() || [];
+  }
+}
+
+function renderTasks() {
+  const tasks = state.tasks;
+  const empty  = document.getElementById('task-empty');
+  if (!tasks.length) {
+    empty.style.display = 'block';
+    clearKanban(); clearTaskTable(); return;
+  }
+  empty.style.display = 'none';
+  if (state.taskView === 'kanban') renderKanban(tasks);
+  else renderTaskTable(tasks);
+}
+
+function clearKanban() {
+  ['bekliyor','devam_ediyor','tamamlandi','iptal'].forEach(s => {
+    const el = document.getElementById('cards-'+s);
+    if (el) el.innerHTML = '';
+    const cnt = document.getElementById('cnt-'+s);
+    if (cnt) cnt.textContent = '0';
+  });
+}
+
+function clearTaskTable() {
+  const tb = document.getElementById('task-table-body');
+  if (tb) tb.innerHTML = '';
+}
+
+function renderKanban(tasks) {
+  clearKanban();
+  const groups = { bekliyor:[], devam_ediyor:[], tamamlandi:[], iptal:[] };
+  tasks.forEach(t => { if (groups[t.status]) groups[t.status].push(t); });
+
+  Object.keys(groups).forEach(status => {
+    const cont = document.getElementById('cards-'+status);
+    const cnt  = document.getElementById('cnt-'+status);
+    if (!cont) return;
+    cnt.textContent = groups[status].length;
+    cont.innerHTML  = groups[status].map(t => taskCardHTML(t)).join('');
+    cont.querySelectorAll('.task-card').forEach(card => {
+      card.addEventListener('click', () => openGorevDetail(parseInt(card.dataset.id)));
+      card.addEventListener('dragstart', onDragStart);
+      card.addEventListener('dragend',   onDragEnd);
+    });
+  });
+
+  document.querySelectorAll('.kanban-cards').forEach(col => {
+    col.addEventListener('dragover',  onDragOver);
+    col.addEventListener('dragleave', onDragLeave);
+    col.addEventListener('drop',      onDrop);
+  });
+}
+
+function taskCardHTML(t) {
+  const due  = t.due_date ? dueChipHTML(t.due_date) : '';
+  const assigneeChips = (t.assignees||[]).slice(0,4).map(a =>
+    `<div class="assignee-mini" title="${escHtml(a.full_name)}">${a.full_name[0].toUpperCase()}</div>`
+  ).join('');
+  const subCount = (t.subtasks||[]).length;
+  return `<div class="task-card" data-id="${t.id}" draggable="true">
+    <div class="task-card-title">${escHtml(t.title)}</div>
+    <div class="task-card-meta">
+      <span class="priority-badge ${PRIORITY_CLASS[t.priority]||'prio-normal'}">${PRIORITY_LABEL[t.priority]||t.priority}</span>
+      ${due}
+      ${subCount ? `<span class="sub-chip">↳ ${subCount}</span>` : ''}
+      <div class="task-card-assignees">${assigneeChips}</div>
+    </div>
+  </div>`;
+}
+
+function dueChipHTML(dueDateStr) {
+  if (!dueDateStr) return '';
+  const due  = new Date(dueDateStr);
+  const now  = new Date();
+  const diff = Math.ceil((due - now) / 86400000);
+  let cls = 'due-ok', label = due.toLocaleDateString('tr-TR', {day:'2-digit',month:'short'});
+  if (diff < 0)  { cls = 'due-late';    label = '⚠ '+label; }
+  else if (diff <= 3) { cls = 'due-warning'; }
+  return `<span class="due-chip ${cls}">${label}</span>`;
+}
+
+function renderTaskTable(tasks) {
+  clearTaskTable();
+  const tbody = document.getElementById('task-table-body');
+  if (!tbody) return;
+  tbody.innerHTML = tasks.map(t => {
+    const assignees = (t.assignees||[]).map(a=>a.full_name).join(', ')||'—';
+    const due = t.due_date ? new Date(t.due_date).toLocaleDateString('tr-TR') : '—';
+    const subCount = (t.subtasks||[]).length;
+    return `<tr data-id="${t.id}" onclick="openGorevDetail(${t.id})">
+      <td><b>${escHtml(t.title)}</b></td>
+      <td><span class="status-badge ${STATUS_TASK_CLASS[t.status]||''}">${STATUS_TASK_LABEL[t.status]||t.status}</span></td>
+      <td><span class="priority-badge ${PRIORITY_CLASS[t.priority]||'prio-normal'}">${PRIORITY_LABEL[t.priority]||t.priority}</span></td>
+      <td>${escHtml(assignees)}</td>
+      <td>${due}</td>
+      <td>${subCount ? `<span class="sub-chip">${subCount}</span>` : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ── Kanban drag & drop ───────────────────────────────── */
+let _dragId = null;
+function onDragStart(e) {
+  _dragId = parseInt(e.currentTarget.dataset.id);
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+}
+function onDragEnd(e) { e.currentTarget.classList.remove('dragging'); }
+function onDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.closest('.kanban-col').classList.add('drag-over');
+}
+function onDragLeave(e) { e.currentTarget.closest('.kanban-col')?.classList.remove('drag-over'); }
+async function onDrop(e) {
+  e.preventDefault();
+  const col = e.currentTarget.closest('.kanban-col');
+  col.classList.remove('drag-over');
+  const newStatus = col.dataset.status;
+  if (!_dragId || !newStatus) return;
+  const task = state.tasks.find(t => t.id === _dragId);
+  if (!task || task.status === newStatus) return;
+  try {
+    await API.updateTaskStatus(_dragId, newStatus);
+    await loadTasks();
+  } catch(e) { showToast(e.message,'error'); }
+}
+
+/* ── View toggle ─────────────────────────────────────── */
+document.getElementById('task-kanban-btn')?.addEventListener('click', ()=>{
+  state.taskView = 'kanban';
+  document.getElementById('task-kanban').style.display = '';
+  document.getElementById('task-list-view').style.display = 'none';
+  document.getElementById('task-kanban-btn').classList.add('active');
+  document.getElementById('task-list-btn').classList.remove('active');
+  renderTasks();
+});
+document.getElementById('task-list-btn')?.addEventListener('click', ()=>{
+  state.taskView = 'list';
+  document.getElementById('task-kanban').style.display = 'none';
+  document.getElementById('task-list-view').style.display = '';
+  document.getElementById('task-list-btn').classList.add('active');
+  document.getElementById('task-kanban-btn').classList.remove('active');
+  renderTasks();
+});
+
+/* ── Filters ─────────────────────────────────────────── */
+document.getElementById('task-status-filter')?.addEventListener('change', loadTasks);
+document.getElementById('task-priority-filter')?.addEventListener('change', loadTasks);
+
+/* ── New Task button ─────────────────────────────────── */
+document.getElementById('yeni-gorev-btn')?.addEventListener('click', async ()=>{
+  state.taskParentId = null;
+  await openGorevModal(null);
+});
+
+/* ── Task modal ──────────────────────────────────────── */
+async function openGorevModal(task, parentId) {
+  state.editTaskId   = task ? task.id : null;
+  state.taskParentId = parentId || null;
+  await ensureUsers();
+
+  document.getElementById('gorev-modal-title').textContent = task
+    ? (parentId ? 'Alt Görev Düzenle' : 'Görev Düzenle')
+    : (parentId ? 'Alt Görev Ekle' : 'Yeni Görev');
+
+  document.getElementById('g-title').value    = task ? task.title : '';
+  document.getElementById('g-desc').value     = task ? task.description : '';
+  document.getElementById('g-status').value   = task ? task.status : 'bekliyor';
+  document.getElementById('g-priority').value = task ? task.priority : 'normal';
+  document.getElementById('g-due').value      = task && task.due_date
+    ? task.due_date.substring(0, 10) : '';
+
+  const selected = new Set((task?.assignees||[]).map(a => a.id));
+  document.getElementById('g-assignees').innerHTML = state.allUsers.map(u => `
+    <div class="assignee-cb-item${selected.has(u.id)?' selected':''}" data-uid="${u.id}" onclick="toggleAssigneeCb(this)">
+      <div class="assignee-chip-avatar">${u.full_name[0].toUpperCase()}</div>
+      ${escHtml(u.full_name)}
+    </div>`).join('');
+
+  document.getElementById('gorev-overlay').classList.add('open');
+  document.getElementById('g-title').focus();
+}
+
+function toggleAssigneeCb(el) { el.classList.toggle('selected'); }
+
+function closeGorevModal() { document.getElementById('gorev-overlay').classList.remove('open'); }
+document.getElementById('close-gorev-modal')?.addEventListener('click', closeGorevModal);
+document.getElementById('gorev-iptal-btn')?.addEventListener('click', closeGorevModal);
+
+document.getElementById('gorev-kaydet-btn')?.addEventListener('click', async ()=>{
+  const title    = document.getElementById('g-title').value.trim();
+  const desc     = document.getElementById('g-desc').value.trim();
+  const status   = document.getElementById('g-status').value;
+  const priority = document.getElementById('g-priority').value;
+  const due      = document.getElementById('g-due').value || null;
+  if (!title) { showToast('Başlık zorunludur','error'); return; }
+
+  const assignees = [...document.querySelectorAll('#g-assignees .selected')]
+    .map(el => parseInt(el.dataset.uid));
+
+  const payload = {
+    title, description: desc, status, priority,
+    due_date: due ? new Date(due).toISOString() : null,
+    assignees,
+    parent_id: state.taskParentId || null,
+  };
+
+  try {
+    if (state.editTaskId) {
+      await API.updateTask(state.editTaskId, payload);
+      showToast('✅ Görev güncellendi!');
+    } else {
+      await API.createTask(payload);
+      showToast('🎉 Görev eklendi!');
+    }
+    closeGorevModal();
+    await loadTasks();
+    if (state.viewTaskId) await refreshGorevDetail(state.viewTaskId);
+  } catch(e) { showToast(e.message,'error'); }
+});
+
+/* ── Task detail modal ───────────────────────────────── */
+async function openGorevDetail(id) {
+  state.viewTaskId = id;
+  try {
+    const t = await API.getTask(id);
+    renderGorevDetail(t);
+    document.getElementById('gorev-detail-overlay').classList.add('open');
+  } catch(e) { showToast(e.message,'error'); }
+}
+
+async function refreshGorevDetail(id) {
+  try {
+    const t = await API.getTask(id);
+    renderGorevDetail(t);
+  } catch(_) {}
+}
+
+function renderGorevDetail(t) {
+  document.getElementById('gd-title').textContent = t.title;
+  document.getElementById('gd-priority-badge').className = `priority-badge ${PRIORITY_CLASS[t.priority]||'prio-normal'}`;
+  document.getElementById('gd-priority-badge').textContent = PRIORITY_LABEL[t.priority]||t.priority;
+
+  document.getElementById('gd-status').className   = `status-badge ${STATUS_TASK_CLASS[t.status]||''}`;
+  document.getElementById('gd-status').textContent = STATUS_TASK_LABEL[t.status]||t.status;
+
+  document.getElementById('gd-due').textContent = t.due_date
+    ? new Date(t.due_date).toLocaleDateString('tr-TR') : '—';
+  document.getElementById('gd-creator').textContent = t.creator_name || '—';
+
+  const descBlock = document.getElementById('gd-desc-block');
+  const descEl    = document.getElementById('gd-desc');
+  if (t.description) {
+    descEl.textContent  = t.description;
+    descBlock.style.display = '';
+  } else {
+    descBlock.style.display = 'none';
+  }
+
+  // Assignees
+  document.getElementById('gd-assignees').innerHTML = (t.assignees||[]).length
+    ? (t.assignees||[]).map(a => `
+        <div class="assignee-chip">
+          <div class="assignee-chip-avatar">${a.full_name[0].toUpperCase()}</div>
+          ${escHtml(a.full_name)}
+        </div>`).join('')
+    : '<span class="muted" style="font-size:13px">Atanan yok</span>';
+
+  // Subtasks
+  const subtasks = t.subtasks || [];
+  document.getElementById('gd-subtasks').innerHTML = subtasks.length
+    ? `<div class="subtask-list">${subtasks.map(st => `
+        <div class="subtask-row" onclick="openGorevDetail(${st.id})">
+          <input type="checkbox" class="subtask-checkbox" ${st.status==='tamamlandi'?'checked':''} onclick="event.stopPropagation();toggleSubtaskStatus(${st.id},${st.status==='tamamlandi'})">
+          <span style="${st.status==='tamamlandi'?'text-decoration:line-through;color:var(--muted)':''}">${escHtml(st.title)}</span>
+          <span class="priority-badge ${PRIORITY_CLASS[st.priority]||'prio-normal'}" style="margin-left:auto;font-size:10px">${PRIORITY_LABEL[st.priority]}</span>
+        </div>`).join('')}
+      </div>`
+    : '<div class="muted" style="font-size:13px">Alt görev yok.</div>';
+
+  // Images
+  const images = t.images || [];
+  document.getElementById('gd-images').innerHTML = images.length
+    ? images.map(img => `
+        <div class="task-img-wrap">
+          <img src="${img.path}" alt="" onclick="openLightbox(this.src)">
+          <button class="task-img-del" onclick="deleteTaskImg(${t.id},${img.id})" title="Sil">×</button>
+        </div>`).join('')
+    : '<div class="muted" style="font-size:13px">Resim yok.</div>';
+
+  // Comments
+  const comments = t.comments || [];
+  const meID = API.getUserID();
+  document.getElementById('gd-comments').innerHTML = comments.length
+    ? comments.map(c => `
+        <div class="task-comment">
+          <div class="task-comment-header">
+            <span class="task-comment-author">${escHtml(c.user_name)}</span>
+            <span style="display:flex;align-items:center;gap:4px">
+              <span class="task-comment-time">${timeAgo(c.created_at)}</span>
+              ${(c.user_id===meID||API.isAdmin()) ? `<button class="task-comment-del" onclick="deleteTaskComment(${t.id},${c.id})">🗑</button>` : ''}
+            </span>
+          </div>
+          <div class="task-comment-body">${escHtml(c.body)}</div>
+        </div>`).join('')
+    : '<div class="muted" style="font-size:13px;padding:8px 0">Henüz yorum yok.</div>';
+
+  document.getElementById('gd-comment-text').value = '';
+}
+
+async function toggleSubtaskStatus(id, isDone) {
+  const newStatus = isDone ? 'bekliyor' : 'tamamlandi';
+  try {
+    await API.updateTaskStatus(id, newStatus);
+    await refreshGorevDetail(state.viewTaskId);
+    await loadTasks();
+  } catch(e) { showToast(e.message,'error'); }
+}
+
+async function deleteTaskImg(taskId, imgId) {
+  if (!confirm('Resmi silmek istediğinize emin misiniz?')) return;
+  try {
+    await API.deleteTaskImage(taskId, imgId);
+    await refreshGorevDetail(taskId);
+  } catch(e) { showToast(e.message,'error'); }
+}
+
+async function deleteTaskComment(taskId, cid) {
+  if (!confirm('Yorumu silmek istediğinize emin misiniz?')) return;
+  try {
+    await API.deleteTaskComment(taskId, cid);
+    await refreshGorevDetail(taskId);
+  } catch(e) { showToast(e.message,'error'); }
+}
+
+document.getElementById('close-gorev-detail')?.addEventListener('click', ()=>{
+  document.getElementById('gorev-detail-overlay').classList.remove('open');
+  state.viewTaskId = null;
+});
+
+document.getElementById('gd-edit-btn')?.addEventListener('click', async ()=>{
+  const t = state.tasks.find(t=>t.id===state.viewTaskId)
+    || await API.getTask(state.viewTaskId);
+  document.getElementById('gorev-detail-overlay').classList.remove('open');
+  await openGorevModal(t);
+});
+
+document.getElementById('gd-add-subtask-btn')?.addEventListener('click', async ()=>{
+  document.getElementById('gorev-detail-overlay').classList.remove('open');
+  await openGorevModal(null, state.viewTaskId);
+});
+
+// Image upload from detail
+document.getElementById('gd-img-input')?.addEventListener('change', async (e)=>{
+  const file = e.target.files[0]; if (!file) return;
+  try {
+    await API.uploadTaskImage(state.viewTaskId, file);
+    await refreshGorevDetail(state.viewTaskId);
+    showToast('Resim eklendi!');
+  } catch(e) { showToast(e.message,'error'); }
+  e.target.value = '';
+});
+
+// Comment submit
+document.getElementById('gd-comment-btn')?.addEventListener('click', async ()=>{
+  const body = document.getElementById('gd-comment-text').value.trim();
+  if (!body) return;
+  try {
+    await API.addTaskComment(state.viewTaskId, body);
+    await refreshGorevDetail(state.viewTaskId);
+  } catch(e) { showToast(e.message,'error'); }
+});
+document.getElementById('gd-comment-text')?.addEventListener('keydown', e=>{
+  if (e.key==='Enter' && e.ctrlKey) document.getElementById('gd-comment-btn').click();
+});
+
+/* ── Helpers ─────────────────────────────────────────── */
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function timeAgo(dateStr) {
+  if (!dateStr) return '';
+  const d   = new Date(dateStr);
+  const sec = Math.floor((Date.now() - d) / 1000);
+  if (sec < 60) return 'az önce';
+  if (sec < 3600) return Math.floor(sec/60)+'dk önce';
+  if (sec < 86400) return Math.floor(sec/3600)+'sa önce';
+  return d.toLocaleDateString('tr-TR');
 }
 
 /* ═══════════════════════════════════════════════════════

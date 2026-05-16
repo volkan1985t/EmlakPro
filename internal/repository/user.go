@@ -18,10 +18,10 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 
 func (r *UserRepository) Create(u *model.User) error {
 	return r.db.QueryRow(`
-		INSERT INTO users (username, email, password_hash, full_name, role, is_active)
-		VALUES ($1,$2,$3,$4,$5,$6)
+		INSERT INTO users (username, email, password_hash, full_name, role, is_active, telegram_chat_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
 		RETURNING id, created_at, updated_at`,
-		u.Username, u.Email, u.PasswordHash, u.FullName, u.Role, u.IsActive,
+		u.Username, u.Email, u.PasswordHash, u.FullName, u.Role, u.IsActive, nullStr(u.TelegramChatID),
 	).Scan(&u.ID, &u.CreatedAt, &u.UpdatedAt)
 }
 
@@ -38,33 +38,37 @@ func (r *UserRepository) CreateRaw(username, email, passwordHash, fullName, role
 
 func (r *UserRepository) GetByUsername(username string) (*model.User, error) {
 	u := &model.User{}
+	var chatID sql.NullString
 	err := r.db.QueryRow(`
-		SELECT id,username,email,password_hash,full_name,role,is_active,created_at,updated_at
+		SELECT id,username,email,password_hash,full_name,role,is_active,telegram_chat_id,created_at,updated_at
 		FROM users WHERE username=$1`, username,
 	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash,
-		&u.FullName, &u.Role, &u.IsActive, &u.CreatedAt, &u.UpdatedAt)
+		&u.FullName, &u.Role, &u.IsActive, &chatID, &u.CreatedAt, &u.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
+	u.TelegramChatID = chatID.String
 	return u, err
 }
 
 func (r *UserRepository) GetByID(id int64) (*model.User, error) {
 	u := &model.User{}
+	var chatID sql.NullString
 	err := r.db.QueryRow(`
-		SELECT id,username,email,password_hash,full_name,role,is_active,created_at,updated_at
+		SELECT id,username,email,password_hash,full_name,role,is_active,telegram_chat_id,created_at,updated_at
 		FROM users WHERE id=$1`, id,
 	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash,
-		&u.FullName, &u.Role, &u.IsActive, &u.CreatedAt, &u.UpdatedAt)
+		&u.FullName, &u.Role, &u.IsActive, &chatID, &u.CreatedAt, &u.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
+	u.TelegramChatID = chatID.String
 	return u, err
 }
 
 func (r *UserRepository) List() ([]model.User, error) {
 	rows, err := r.db.Query(`
-		SELECT id,username,email,full_name,role,is_active,created_at,updated_at
+		SELECT id,username,email,full_name,role,is_active,COALESCE(telegram_chat_id,''),created_at,updated_at
 		FROM users ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -74,7 +78,7 @@ func (r *UserRepository) List() ([]model.User, error) {
 	for rows.Next() {
 		var u model.User
 		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.FullName,
-			&u.Role, &u.IsActive, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			&u.Role, &u.IsActive, &u.TelegramChatID, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		users = append(users, u)
@@ -99,6 +103,33 @@ func (r *UserRepository) Delete(id int64) error {
 		return fmt.Errorf("kullanıcı bulunamadı veya admin silinemez")
 	}
 	return nil
+}
+
+func (r *UserRepository) SetTelegramChatID(id int64, chatID string) error {
+	_, err := r.db.Exec(`UPDATE users SET telegram_chat_id=$1, updated_at=NOW() WHERE id=$2`, nullStr(chatID), id)
+	return err
+}
+
+func (r *UserRepository) ListWithChatIDs() ([]model.User, error) {
+	rows, err := r.db.Query(`
+		SELECT id, full_name, COALESCE(telegram_chat_id,'')
+		FROM users WHERE is_active=true AND telegram_chat_id IS NOT NULL AND telegram_chat_id != ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var users []model.User
+	for rows.Next() {
+		var u model.User
+		rows.Scan(&u.ID, &u.FullName, &u.TelegramChatID)
+		users = append(users, u)
+	}
+	return users, nil
+}
+
+func nullStr(s string) interface{} {
+	if s == "" { return nil }
+	return s
 }
 
 func (r *UserRepository) AdminExists() (bool, error) {

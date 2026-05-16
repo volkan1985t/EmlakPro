@@ -56,6 +56,7 @@
       <button class="nav-btn active" data-page="ilanlar">📋 Portföy</button>
       <button class="nav-btn" data-page="talepler">🎯 Talepler</button>
       <button class="nav-btn" data-page="musteriler">👥 Müşteriler</button>
+      <button class="nav-btn" data-page="gorevler">✅ Görevler</button>
       <button class="nav-btn" data-page="dashboard">📊 Dashboard</button>
       <button class="nav-btn admin-only" data-page="admin" style="display:none">🔧 Admin</button>
     </nav>
@@ -110,6 +111,89 @@
         <button class="btn btn-gold btn-sm" style="margin-left:auto" id="yeni-musteri-btn">+ Müşteri Ekle</button>
       </div>
       <div id="musteri-list" class="crm-list"></div>
+    </div>
+
+    <!-- GÖREVLER -->
+    <div class="page" id="page-gorevler">
+      <div class="toolbar">
+        <select id="task-status-filter">
+          <option value="">Tüm Durumlar</option>
+          <option value="bekliyor">Bekliyor</option>
+          <option value="devam_ediyor">Devam Ediyor</option>
+          <option value="tamamlandi">Tamamlandı</option>
+          <option value="iptal">İptal</option>
+        </select>
+        <select id="task-priority-filter">
+          <option value="">Tüm Öncelikler</option>
+          <option value="acil">Acil</option>
+          <option value="yuksek">Yüksek</option>
+          <option value="normal">Normal</option>
+          <option value="dusuk">Düşük</option>
+        </select>
+        <div class="view-toggle" style="margin-left:8px">
+          <button class="view-btn active" id="task-kanban-btn" title="Kanban">⬜</button>
+          <button class="view-btn" id="task-list-btn" title="Liste">☰</button>
+        </div>
+        <button class="btn btn-gold btn-sm" style="margin-left:auto" id="yeni-gorev-btn">+ Görev Ekle</button>
+      </div>
+
+      <!-- KANBAN -->
+      <div id="task-kanban" class="kanban-board">
+        <div class="kanban-col" id="col-bekliyor" data-status="bekliyor">
+          <div class="kanban-col-header">
+            <span class="status-dot dot-bekliyor"></span>
+            <span>Bekliyor</span>
+            <span class="kanban-count" id="cnt-bekliyor">0</span>
+          </div>
+          <div class="kanban-cards" id="cards-bekliyor"></div>
+        </div>
+        <div class="kanban-col" id="col-devam_ediyor" data-status="devam_ediyor">
+          <div class="kanban-col-header">
+            <span class="status-dot dot-devam"></span>
+            <span>Devam Ediyor</span>
+            <span class="kanban-count" id="cnt-devam_ediyor">0</span>
+          </div>
+          <div class="kanban-cards" id="cards-devam_ediyor"></div>
+        </div>
+        <div class="kanban-col" id="col-tamamlandi" data-status="tamamlandi">
+          <div class="kanban-col-header">
+            <span class="status-dot dot-tamam"></span>
+            <span>Tamamlandı</span>
+            <span class="kanban-count" id="cnt-tamamlandi">0</span>
+          </div>
+          <div class="kanban-cards" id="cards-tamamlandi"></div>
+        </div>
+        <div class="kanban-col" id="col-iptal" data-status="iptal">
+          <div class="kanban-col-header">
+            <span class="status-dot dot-iptal"></span>
+            <span>İptal</span>
+            <span class="kanban-count" id="cnt-iptal">0</span>
+          </div>
+          <div class="kanban-cards" id="cards-iptal"></div>
+        </div>
+      </div>
+
+      <!-- LİSTE -->
+      <div id="task-list-view" style="display:none">
+        <table class="task-table">
+          <thead>
+            <tr>
+              <th>Görev</th>
+              <th>Durum</th>
+              <th>Öncelik</th>
+              <th>Atanan</th>
+              <th>Bitiş</th>
+              <th>Alt Görev</th>
+            </tr>
+          </thead>
+          <tbody id="task-table-body"></tbody>
+        </table>
+      </div>
+
+      <div class="empty-state" id="task-empty" style="display:none">
+        <div class="big-icon">✅</div>
+        <p>Henüz görev yok.</p>
+      </div>
     </div>
 
     <!-- DASHBOARD -->
@@ -334,6 +418,135 @@
     <div class="modal-footer">
       <button class="btn btn-outline" id="user-iptal-btn">İptal</button>
       <button class="btn btn-blue" id="user-kaydet-btn">💾 Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<!-- GÖREV FORM MODAL (create/edit) -->
+<div class="overlay" id="gorev-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="gorev-modal-title">Yeni Görev</h3>
+      <button class="close-btn" id="close-gorev-modal">×</button>
+    </div>
+    <div class="form-group">
+      <label>Başlık <span class="req">*</span></label>
+      <input id="g-title" type="text" placeholder="Görev başlığı...">
+    </div>
+    <div class="form-group">
+      <label>Açıklama</label>
+      <textarea id="g-desc" rows="3" placeholder="Detaylar..."></textarea>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Durum</label>
+        <select id="g-status">
+          <option value="bekliyor">Bekliyor</option>
+          <option value="devam_ediyor">Devam Ediyor</option>
+          <option value="tamamlandi">Tamamlandı</option>
+          <option value="iptal">İptal</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Öncelik</label>
+        <select id="g-priority">
+          <option value="normal">Normal</option>
+          <option value="dusuk">Düşük</option>
+          <option value="yuksek">Yüksek</option>
+          <option value="acil">Acil 🔴</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Bitiş Tarihi</label>
+        <input id="g-due" type="date">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Atananlar</label>
+      <div id="g-assignees" class="assignee-checkboxes"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="gorev-iptal-btn">İptal</button>
+      <button class="btn btn-blue" id="gorev-kaydet-btn">💾 Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<!-- GÖREV DETAY MODAL -->
+<div class="overlay" id="gorev-detail-overlay">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+        <span id="gd-priority-badge" class="priority-badge"></span>
+        <h3 id="gd-title" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></h3>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+        <button class="btn btn-blue btn-sm" id="gd-edit-btn">✏️ Düzenle</button>
+        <button class="close-btn" id="close-gorev-detail">×</button>
+      </div>
+    </div>
+
+    <div class="task-detail-body">
+      <div class="task-detail-main">
+        <!-- Meta bilgiler -->
+        <div class="task-meta-row">
+          <div class="task-meta-item">
+            <span class="task-meta-label">Durum</span>
+            <span id="gd-status" class="status-badge"></span>
+          </div>
+          <div class="task-meta-item">
+            <span class="task-meta-label">Bitiş</span>
+            <span id="gd-due" class="task-meta-val">—</span>
+          </div>
+          <div class="task-meta-item">
+            <span class="task-meta-label">Oluşturan</span>
+            <span id="gd-creator" class="task-meta-val"></span>
+          </div>
+        </div>
+
+        <!-- Açıklama -->
+        <div class="form-group" id="gd-desc-block" style="display:none">
+          <label>Açıklama</label>
+          <div id="gd-desc" class="task-desc"></div>
+        </div>
+
+        <!-- Atananlar -->
+        <div class="form-group">
+          <label>Atananlar</label>
+          <div id="gd-assignees" class="assignee-chips"></div>
+        </div>
+
+        <!-- Alt Görevler -->
+        <div class="form-group">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <label style="margin:0">Alt Görevler</label>
+            <button class="btn btn-sm btn-outline" id="gd-add-subtask-btn">+ Alt Görev</button>
+          </div>
+          <div id="gd-subtasks"></div>
+        </div>
+
+        <!-- Resimler -->
+        <div class="form-group">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <label style="margin:0">Resimler</label>
+            <label class="btn btn-sm btn-outline" style="cursor:pointer">
+              📎 Resim Ekle
+              <input type="file" id="gd-img-input" accept="image/*" style="display:none">
+            </label>
+          </div>
+          <div id="gd-images" class="task-images-grid"></div>
+        </div>
+      </div>
+
+      <!-- Yorumlar -->
+      <div class="task-detail-comments">
+        <label style="font-weight:600;font-size:13px;margin-bottom:8px;display:block">Yorumlar</label>
+        <div id="gd-comments" class="task-comments-list"></div>
+        <div class="task-comment-input">
+          <textarea id="gd-comment-text" rows="2" placeholder="Yorum ekle..."></textarea>
+          <button class="btn btn-blue btn-sm" id="gd-comment-btn">Gönder</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
