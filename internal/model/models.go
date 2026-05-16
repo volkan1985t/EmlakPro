@@ -17,6 +17,7 @@ type User struct {
 	Role           Role      `json:"role" db:"role"`
 	IsActive       bool      `json:"is_active" db:"is_active"`
 	TelegramChatID string    `json:"telegram_chat_id,omitempty" db:"telegram_chat_id"`
+	NotifyTelegram bool      `json:"notify_telegram" db:"notify_telegram"`
 	CreatedAt      time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
 }

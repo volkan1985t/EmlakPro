@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/volkan1985t/EmlakPro/internal/model"
@@ -40,10 +41,10 @@ func (r *UserRepository) GetByUsername(username string) (*model.User, error) {
 	u := &model.User{}
 	var chatID sql.NullString
 	err := r.db.QueryRow(`
-		SELECT id,username,email,password_hash,full_name,role,is_active,telegram_chat_id,created_at,updated_at
+		SELECT id,username,email,password_hash,full_name,role,is_active,telegram_chat_id,COALESCE(notify_telegram,true),created_at,updated_at
 		FROM users WHERE username=$1`, username,
 	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash,
-		&u.FullName, &u.Role, &u.IsActive, &chatID, &u.CreatedAt, &u.UpdatedAt)
+		&u.FullName, &u.Role, &u.IsActive, &chatID, &u.NotifyTelegram, &u.CreatedAt, &u.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -55,10 +56,10 @@ func (r *UserRepository) GetByID(id int64) (*model.User, error) {
 	u := &model.User{}
 	var chatID sql.NullString
 	err := r.db.QueryRow(`
-		SELECT id,username,email,password_hash,full_name,role,is_active,telegram_chat_id,created_at,updated_at
+		SELECT id,username,email,password_hash,full_name,role,is_active,telegram_chat_id,COALESCE(notify_telegram,true),created_at,updated_at
 		FROM users WHERE id=$1`, id,
 	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash,
-		&u.FullName, &u.Role, &u.IsActive, &chatID, &u.CreatedAt, &u.UpdatedAt)
+		&u.FullName, &u.Role, &u.IsActive, &chatID, &u.NotifyTelegram, &u.CreatedAt, &u.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -68,7 +69,7 @@ func (r *UserRepository) GetByID(id int64) (*model.User, error) {
 
 func (r *UserRepository) List() ([]model.User, error) {
 	rows, err := r.db.Query(`
-		SELECT id,username,email,full_name,role,is_active,COALESCE(telegram_chat_id,''),created_at,updated_at
+		SELECT id,username,email,full_name,role,is_active,COALESCE(telegram_chat_id,''),COALESCE(notify_telegram,true),created_at,updated_at
 		FROM users ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -78,7 +79,7 @@ func (r *UserRepository) List() ([]model.User, error) {
 	for rows.Next() {
 		var u model.User
 		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.FullName,
-			&u.Role, &u.IsActive, &u.TelegramChatID, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			&u.Role, &u.IsActive, &u.TelegramChatID, &u.NotifyTelegram, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		users = append(users, u)
@@ -125,6 +126,22 @@ func (r *UserRepository) ListWithChatIDs() ([]model.User, error) {
 		users = append(users, u)
 	}
 	return users, nil
+}
+
+func (r *UserRepository) GetByTelegramChatID(chatID int64) (*model.User, error) {
+	u := &model.User{}
+	var chatIDStr sql.NullString
+	err := r.db.QueryRow(`
+		SELECT id,username,email,password_hash,full_name,role,is_active,telegram_chat_id,COALESCE(notify_telegram,true),created_at,updated_at
+		FROM users WHERE telegram_chat_id=$1 AND is_active=true`,
+		strconv.FormatInt(chatID, 10),
+	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash,
+		&u.FullName, &u.Role, &u.IsActive, &chatIDStr, &u.NotifyTelegram, &u.CreatedAt, &u.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	u.TelegramChatID = chatIDStr.String
+	return u, err
 }
 
 func nullStr(s string) interface{} {

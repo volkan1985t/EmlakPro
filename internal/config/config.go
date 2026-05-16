@@ -141,6 +141,12 @@ func (c *Config) FieldByKey(key string) *FieldDefinition {
 	return nil
 }
 
+// NeighborhoodsFor returns the neighborhood list for a district.
+// Currently returns all neighborhoods (no per-district mapping in config).
+func (c *Config) NeighborhoodsFor(district string) []string {
+	return c.Neighborhoods
+}
+
 // SourceValues bir field'ın source'una göre seçenek listesini döner
 func (c *Config) SourceValues(source string) []string {
 	switch source {
