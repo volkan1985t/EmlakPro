@@ -31,3 +31,6 @@ Thumbs.db
 # Ortam değişkenleri
 .env
 .env.*
+emlakpro/
+frontend/static/css/app.css.bak
+frontend/static/js/app.css

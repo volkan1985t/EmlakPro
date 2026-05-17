@@ -1,6 +1,15 @@
--- v3: Task management, per-user telegram_chat_id
+-- v3: Task management, per-user telegram_chat_id, bot sessions
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_chat_id VARCHAR(50);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_telegram BOOLEAN NOT NULL DEFAULT true;
+
+CREATE TABLE IF NOT EXISTS bot_sessions (
+    chat_id    BIGINT PRIMARY KEY,
+    user_id    BIGINT REFERENCES users(id),
+    step       VARCHAR(50),
+    data       JSONB,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
 
 CREATE TABLE IF NOT EXISTS tasks (
     id              BIGSERIAL PRIMARY KEY,

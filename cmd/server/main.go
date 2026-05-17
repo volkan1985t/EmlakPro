@@ -60,8 +60,11 @@ func main() {
 		cfg.Auth.AccessTokenTTLMins,
 		cfg.Auth.RefreshTokenTTLDays,
 	)
-	imageSvc  := service.NewImageService(cfg)
+	imageSvc    := service.NewImageService(cfg)
 	telegramSvc := service.NewTelegramService(&cfg.Telegram, userRepo)
+	notifySvc   := service.NewNotificationService(telegramSvc)
+	botHandler  := handler.NewBotHandler(cfg, telegramSvc, db, userRepo, listingRepo, requestRepo)
+	telegramSvc.SetUpdateHandler(botHandler.Handle)
 	telegramSvc.StartPolling()
 
 	if err := ensureAdmin(cfg, userRepo); err != nil {
@@ -72,6 +75,7 @@ func main() {
 
 	authHandler      := handler.NewAuthHandler(cfg, userRepo, tokenSvc)
 	listingHandler   := handler.NewListingHandler(cfg, listingRepo, imageSvc)
+	listingHandler.SetNotificationDeps(notifySvc, userRepo, requestRepo)
 	uploadHandler    := handler.NewUploadHandler(cfg, imageSvc)
 	requestHandler   := handler.NewRequestHandler(cfg, requestRepo)
 	adminHandler     := handler.NewAdminHandler(cfg, userRepo, listingRepo, requestRepo)

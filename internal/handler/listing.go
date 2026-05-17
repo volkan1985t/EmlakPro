@@ -18,10 +18,19 @@ type ListingHandler struct {
 	cfg         *config.Config
 	listingRepo *repository.ListingRepository
 	imageSvc    *service.ImageService
+	notifySvc   *service.NotificationService
+	userRepo    *repository.UserRepository
+	requestRepo *repository.RequestRepository
 }
 
 func NewListingHandler(cfg *config.Config, repo *repository.ListingRepository, imageSvc *service.ImageService) *ListingHandler {
 	return &ListingHandler{cfg: cfg, listingRepo: repo, imageSvc: imageSvc}
+}
+
+func (h *ListingHandler) SetNotificationDeps(n *service.NotificationService, ur *repository.UserRepository, rr *repository.RequestRepository) {
+	h.notifySvc  = n
+	h.userRepo   = ur
+	h.requestRepo = rr
 }
 
 // GET /api/listings
@@ -123,10 +132,78 @@ func (h *ListingHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if full != nil {
 		full.CoverImage = h.imageSvc.PathToURL(full.CoverImage)
 		for i := range full.Images { full.Images[i].Path = h.imageSvc.PathToURL(full.Images[i].Path) }
+		if h.notifySvc != nil {
+			go h.sendListingNotification(full)
+		}
 		jsonOK(w, full)
 	} else {
 		jsonOK(w, listing)
 	}
+}
+
+func (h *ListingHandler) sendListingNotification(listing *model.Listing) {
+	usersWithChat, err := h.userRepo.ListWithChatIDs()
+	if err != nil {
+		log.Printf("[notify] ListWithChatIDs: %v", err)
+		return
+	}
+
+	chatByUserID := map[int64]int64{}
+	var allUsers []service.UserForNotify
+	for _, u := range usersWithChat {
+		chatID, _ := strconv.ParseInt(u.TelegramChatID, 10, 64)
+		if chatID == 0 {
+			continue
+		}
+		chatByUserID[u.ID] = chatID
+		notifyType := "none"
+		if u.NotifyTelegram {
+			notifyType = "all"
+		}
+		allUsers = append(allUsers, service.UserForNotify{
+			ID:         u.ID,
+			ChatID:     chatID,
+			NotifyType: notifyType,
+		})
+	}
+
+	owner, _ := h.userRepo.GetByID(listing.UserID)
+	ownerName := ""
+	if owner != nil {
+		ownerName = owner.FullName
+	}
+
+	lm := service.ListingForMatch{
+		ID:          listing.ID,
+		ListingNo:   listing.ListingNo,
+		UserID:      listing.UserID,
+		OwnerID:     listing.UserID,
+		OwnerName:   ownerName,
+		OwnerChatID: chatByUserID[listing.UserID],
+		IsActive:    listing.IsActive,
+		Fields:      listing.Fields,
+	}
+
+	reqs, err := h.requestRepo.List(repository.RequestFilter{OnlyActive: true})
+	if err != nil {
+		log.Printf("[notify] requestRepo.List: %v", err)
+		return
+	}
+	var requests []service.RequestForMatch
+	for _, req := range reqs {
+		if !req.NotifyMe {
+			continue
+		}
+		requests = append(requests, service.RequestForMatch{
+			ID:         req.ID,
+			UserID:     req.UserID,
+			UserChatID: chatByUserID[req.UserID],
+			NotifyMe:   req.NotifyMe,
+			Fields:     req.Fields,
+		})
+	}
+
+	h.notifySvc.NotifyNewListing(lm, allUsers, requests)
 }
 
 // PUT /api/listings/{id}
