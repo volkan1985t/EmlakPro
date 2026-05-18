@@ -62,14 +62,14 @@ const API = (() => {
     if (res.status === 401 && _refreshToken) {
       const ok = await doRefresh();
       if (ok) { res = await fetch('/api' + path, makeOpts()); }
-      else { window.dispatchEvent(new Event('session-expired')); throw new Error('Oturum süresi doldu.'); }
+      else { window.dispatchEvent(new Event('session-expired')); throw new Error('Oturum suresi doldu.'); }
     }
     const data = await res.json();
-    if (!data.success) throw new Error(data.error || 'Bir hata oluştu');
+    if (!data.success) throw new Error(data.error || 'Bir hata olustu');
     return data.data;
   }
 
-  // ── Auth ──────────────────────────────────────────────────
+  // -- Auth --
   async function login(username, password) {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
@@ -77,7 +77,7 @@ const API = (() => {
       body: JSON.stringify({ username, password })
     });
     const data = await res.json();
-    if (!data.success) throw new Error(data.error || 'Giriş başarısız');
+    if (!data.success) throw new Error(data.error || 'Giris basarisiz');
     setSession(data.data); return data.data;
   }
   async function logout() {
@@ -92,13 +92,13 @@ const API = (() => {
     return doRefresh();
   }
 
-  // ── Config ────────────────────────────────────────────────
+  // -- Config --
   async function getConfig() { return request('GET', '/config'); }
 
-  // ── Kullanıcı listesi (atama için) ────────────────────────
+  // -- Kullanici listesi (atama icin) --
   async function getUsers() { return request('GET', '/users'); }
 
-  // ── İlanlar ───────────────────────────────────────────────
+  // -- Ilanlar --
   async function getListings(params = {}) {
     const q = new URLSearchParams(params).toString();
     return request('GET', '/listings' + (q ? '?' + q : ''));
@@ -114,7 +114,7 @@ const API = (() => {
     return request('DELETE', '/listings/' + listingId + '/images/' + imgId);
   }
 
-  // ── Upload ────────────────────────────────────────────────
+  // -- Upload --
   async function uploadCover(file) {
     const fd = new FormData(); fd.append('cover', file);
     return request('POST', '/upload/cover', fd, true);
@@ -124,7 +124,7 @@ const API = (() => {
     return request('POST', '/upload/gallery', fd, true);
   }
 
-  // ── Talepler ──────────────────────────────────────────────
+  // -- Talepler --
   async function getRequests(params = {}) {
     const q = new URLSearchParams(params).toString();
     return request('GET', '/requests' + (q ? '?' + q : ''));
@@ -134,7 +134,7 @@ const API = (() => {
   async function toggleRequest(id)       { return request('PATCH', '/requests/' + id + '/toggle'); }
   async function toggleRequestNotify(id) { return request('PATCH', '/requests/' + id + '/notify'); }
 
-  // ── Müşteriler (CRM) ──────────────────────────────────────
+  // -- Musteriler (CRM) --
   async function getCustomers(params = {}) {
     const q = new URLSearchParams(params).toString();
     return request('GET', '/customers' + (q ? '?' + q : ''));
@@ -151,10 +151,10 @@ const API = (() => {
     return request('DELETE', '/customers/' + customerId + '/listings/' + listingId);
   }
 
-  // ── Dashboard ─────────────────────────────────────────────
+  // -- Dashboard --
   async function getDashboard() { return request('GET', '/dashboard'); }
 
-  // ── Görevler (Tasks) ──────────────────────────────────────
+  // -- Gorevler (Tasks) --
   async function getTasks(params = {}) {
     const q = new URLSearchParams(params).toString();
     return request('GET', '/tasks' + (q ? '?' + q : ''));
@@ -178,7 +178,7 @@ const API = (() => {
     return request('DELETE', '/tasks/' + taskId + '/images/' + imgId);
   }
 
-  // ── Admin ─────────────────────────────────────────────────
+  // -- Admin --
   async function adminGetUsers()        { return request('GET',    '/admin/users'); }
   async function adminCreateUser(data)  { return request('POST',   '/admin/users', data); }
   async function adminToggleUser(id)    { return request('PATCH',  '/admin/users/' + id + '/toggle'); }
@@ -190,6 +190,9 @@ const API = (() => {
   async function adminSetChatID(id, chatID) {
     return request('PATCH', '/admin/users/' + id + '/chatid', { telegram_chat_id: chatID });
   }
+  // Admin Settings -- sabahki versiyonda eklenen
+  async function getAdminSettings()     { return request('GET',  '/admin/settings'); }
+  async function updateAdminSettings(d) { return request('PUT',  '/admin/settings', d); }
 
   return {
     login, logout, getUser, getUserID, isAdmin, isLoggedIn, validateSession,
@@ -205,6 +208,7 @@ const API = (() => {
     adminGetUsers, adminCreateUser, adminToggleUser, adminDeleteUser, adminSetChatID,
     adminGetListings, adminDeleteListing,
     adminGetRequests, adminDeleteRequest,
+    getAdminSettings, updateAdminSettings,
     getTasks, getTask, createTask, updateTask, updateTaskStatus, deleteTask,
     addTaskComment, deleteTaskComment, uploadTaskImage, deleteTaskImage,
   };

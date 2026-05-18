@@ -117,6 +117,7 @@ func (h *ListingHandler) Create(w http.ResponseWriter, r *http.Request) {
 		IsActive:   true,
 		IsListed:   true,
 		Status:     "aktif",
+			CustomerID: req.CustomerID,
 	}
 	if err := h.listingRepo.Create(listing); err != nil {
 		log.Printf("Create listing error: %v", err)
@@ -226,6 +227,8 @@ func (h *ListingHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	existing.Fields = req.Fields
 	if req.CoverImage != "" { existing.CoverImage = req.CoverImage }
+	if req.CustomerID > 0 { existing.CustomerID = req.CustomerID }
+	log.Printf("[DEBUG] Update listing %d customer_id=%d req.CustomerID=%d", id, existing.CustomerID, req.CustomerID)
 	if err := h.listingRepo.Update(existing); err != nil {
 		jsonErr(w, "İlan güncellenemedi", http.StatusInternalServerError); return
 	}

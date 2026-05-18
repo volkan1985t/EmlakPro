@@ -1326,3 +1326,94 @@ body {
 .form-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 @media (max-width: 600px) { .form-row { grid-template-columns: 1fr; } }
 
+
+/* ── CRM Akordiyon ───────────────────────────────────── */
+.crm-item { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; overflow: hidden; }
+.crm-item .crm-card { border: none; border-radius: 0; margin-bottom: 0; cursor: pointer; }
+.crm-chevron { margin-left: 8px; font-size: 13px; color: var(--muted); flex-shrink: 0; transition: transform .2s; }
+.crm-accordion { border-top: 1px solid var(--border); background: var(--bg2); padding: 8px; }
+.crm-acc-loading, .crm-acc-empty { font-size: 13px; color: var(--muted); padding: 8px; }
+.crm-acc-ilan { display: flex; align-items: center; gap: 10px; padding: 8px; background: var(--bg); border-radius: var(--radius); margin-bottom: 6px; }
+.crm-acc-thumb { width: 52px; height: 40px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
+.crm-acc-nophoto { display: flex; align-items: center; justify-content: center; background: var(--border); font-size: 18px; }
+.crm-acc-info { flex: 1; min-width: 0; }
+.crm-acc-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crm-acc-meta { font-size: 12px; color: var(--muted); }
+
+/* ── CRM Akordiyon ───────────────────────────────────── */
+.crm-item { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; overflow: hidden; }
+.crm-item .crm-card { border: none; border-radius: 0; margin-bottom: 0; cursor: pointer; }
+.crm-chevron { margin-left: 8px; font-size: 13px; color: var(--muted); flex-shrink: 0; }
+.crm-accordion { border-top: 1px solid var(--border); background: var(--bg2); padding: 8px; }
+.crm-acc-loading, .crm-acc-empty { font-size: 13px; color: var(--muted); padding: 8px; }
+.crm-acc-ilan { display:flex; align-items:center; gap:10px; padding:8px; background:var(--bg); border-radius:var(--radius); margin-bottom:6px; }
+.crm-acc-thumb { width:52px; height:40px; object-fit:cover; border-radius:6px; flex-shrink:0; }
+.crm-acc-nophoto { display:flex; align-items:center; justify-content:center; background:var(--border); font-size:18px; }
+.crm-acc-info { flex:1; min-width:0; }
+.crm-acc-title { font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.crm-acc-meta { font-size:12px; color:var(--muted); }
+
+/* ── Lightbox ok tuşları ─────────────────────────────── */
+.lb-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  background: rgba(255,255,255,.15); border: none; color: #fff;
+  font-size: 48px; line-height: 1; padding: 8px 16px;
+  cursor: pointer; border-radius: 8px; z-index: 10;
+  transition: background .2s; user-select: none;
+}
+.lb-nav:hover { background: rgba(255,255,255,.3); }
+.lb-prev { left: 16px; }
+.lb-next { right: 16px; }
+.lb-close {
+  position: absolute; top: 16px; right: 16px;
+  background: rgba(255,255,255,.15); border: none; color: #fff;
+  font-size: 20px; padding: 6px 12px; cursor: pointer;
+  border-radius: 8px; z-index: 10;
+}
+.lb-close:hover { background: rgba(255,255,255,.3); }
+
+/* ── Talep Form ───────────────────────────────────────── */
+.talep-musteri-info {
+  display: flex; gap: 12px; align-items: center;
+  background: var(--bg2); border-radius: var(--radius);
+  padding: 8px 12px; margin-top: -8px; margin-bottom: 8px;
+  font-size: 13px; font-weight: 500;
+}
+.talep-notify-row {
+  display: flex; align-items: center;
+  justify-content: space-between; padding: 4px 0;
+}
+.talep-notify-label { font-size: 14px; color: var(--text); }
+.talep-toggle-btn {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--border); border: none; border-radius: 20px;
+  padding: 4px 12px 4px 4px; cursor: pointer;
+  transition: background .2s; min-width: 80px;
+}
+.talep-toggle-btn.on { background: #1565C0; }
+.talep-toggle-knob {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: #fff; flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.talep-toggle-text {
+  font-size: 12px; font-weight: 600;
+  color: #fff; flex: 1; text-align: center;
+}
+.talep-toggle-btn:not(.on) .talep-toggle-text { color: var(--muted); }
+
+/* ── Admin Ayarlar ───────────────────────────────────── */
+.settings-grid { display:grid; grid-template-columns:1fr 1fr; gap:24px; padding:16px 0; }
+@media(max-width:768px){ .settings-grid { grid-template-columns:1fr; } }
+.settings-col {}
+.settings-section-title { font-size:14px; font-weight:700; color:var(--text); margin:0 0 12px; padding-bottom:6px; border-bottom:2px solid var(--gold); }
+.setting-group { background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); padding:12px; margin-bottom:12px; }
+.setting-group-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.setting-group-title { font-size:13px; font-weight:600; color:var(--text); }
+.setting-tags { display:flex; flex-wrap:wrap; gap:6px; min-height:32px; }
+.setting-tag { display:inline-flex; align-items:center; gap:4px; background:var(--bg2); border:1px solid var(--border); border-radius:20px; padding:3px 10px; font-size:12px; }
+.setting-tag button { background:none; border:none; cursor:pointer; color:var(--muted); font-size:14px; line-height:1; padding:0 2px; }
+.setting-tag button:hover { color:#c62828; }
+.setting-toggle-row { display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--border); }
+.setting-toggle-row:last-child { border-bottom:none; }
+.settings-footer { padding:16px 0; text-align:right; border-top:1px solid var(--border); margin-top:8px; }

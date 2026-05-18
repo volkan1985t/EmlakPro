@@ -127,16 +127,20 @@ func (s *TelegramService) SendMessage(chatID int64, text string, kb interface{})
 // ── Task notifications ────────────────────────────────────────
 
 func (s *TelegramService) NotifyAssigned(task *model.Task, assignees []model.TaskUser) {
+	log.Printf("[notify] NotifyAssigned called, enabled=%v assignees=%d", s.enabled, len(assignees))
 	if !s.enabled {
 		return
 	}
 	users, err := s.userRepo.ListWithChatIDs()
 	if err != nil {
+	log.Printf("[notify] ListWithChatIDs users=%d err=%v", len(users), err)
 		return
 	}
 	chatByID := map[int64]string{}
 	for _, u := range users {
 		chatByID[u.ID] = u.TelegramChatID
+		log.Printf("[notify] user=%d chatID=%s", u.ID, u.TelegramChatID)
+		log.Printf("[notify] user=%d chatID=%s", u.ID, u.TelegramChatID)
 	}
 	msg := fmt.Sprintf("📋 <b>Yeni Görev Atandı</b>\n\n<b>%s</b>\n\nPriorite: %s\nDurum: %s",
 		task.Title, priorityLabel(task.Priority), statusLabel(task.Status))

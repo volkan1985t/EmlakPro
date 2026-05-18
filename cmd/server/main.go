@@ -170,6 +170,8 @@ func main() {
 			// Admin
 			r.Group(func(r chi.Router) {
 				r.Use(authMW.RequireAdmin)
+				r.Get("/admin/settings",              configHandler.GetSettings)
+				r.Put("/admin/settings",              configHandler.UpdateSettings)
 				r.Get("/admin/users",                 adminHandler.ListUsers)
 				r.Post("/admin/users",                adminHandler.CreateUser)
 				r.Patch("/admin/users/{id}/toggle",   adminHandler.ToggleUser)

@@ -120,20 +120,19 @@ func (r *CustomerRepository) LinkListing(customerID, listingID int64, note strin
 }
 
 func (r *CustomerRepository) UnlinkListing(customerID, listingID int64) error {
-	_, err := r.db.Exec(
-		`DELETE FROM customer_listings WHERE customer_id=$1 AND listing_id=$2`,
-		customerID, listingID)
-	return err
+	r.db.Exec(`DELETE FROM customer_listings WHERE customer_id=$1 AND listing_id=$2`, customerID, listingID)
+	r.db.Exec(`UPDATE listings SET customer_id=NULL WHERE id=$1 AND customer_id=$2`, listingID, customerID)
+	return nil
 }
 
 func (r *CustomerRepository) GetLinkedListings(customerID int64) ([]model.Listing, error) {
 	rows, err := r.db.Query(fmt.Sprintf(`
-		SELECT %s
+		SELECT DISTINCT ON (l.id) %s
 		FROM listings l
 		JOIN users u ON u.id = l.user_id
-		JOIN customer_listings cl ON cl.listing_id = l.id
-		WHERE cl.customer_id = $1
-		ORDER BY cl.created_at DESC`, listingSelectCols), customerID)
+		LEFT JOIN customer_listings cl ON cl.listing_id = l.id
+		WHERE l.customer_id = $1 OR cl.customer_id = $1
+		ORDER BY l.id, l.created_at DESC`, listingSelectCols), customerID)
 	if err != nil { return nil, err }
 	defer rows.Close()
 

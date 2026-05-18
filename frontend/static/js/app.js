@@ -138,6 +138,7 @@ document.querySelectorAll('.admin-tab').forEach(btn => {
     if (this.dataset.tab==='admin-users')    loadAdminUsers();
     if (this.dataset.tab==='admin-listings') loadAdminListings();
     if (this.dataset.tab==='admin-requests') loadAdminRequests();
+    if (this.dataset.tab==='admin-settings') loadAdminSettings();
   });
 });
 
@@ -849,9 +850,15 @@ function buildTalepForm(talep) {
 
   const propType  = talep?.fields?.property_type||'';
   const extraKeys = propType ? (cfg?.request_fields?.by_property?.[propType]||[]) : [];
+  const commonKeys = new Set(common.map(f => f.key));
   const extraFields = extraKeys
-    .map(k=>cfg?.listing_fields?.all_fields?.find(f=>f.key===k))
-    .filter(Boolean);
+    .filter(k => !commonKeys.has(k))
+    .map(k => {
+      if (cfg?._allFieldsMap?.[k]) return cfg._allFieldsMap[k];
+      const inCommon = cfg?.request_fields?.common?.find(f=>f.key===k);
+      if (inCommon) return inCommon;
+      return {key:k, label:k, type:'text', required:false};
+    });
 
   const buildInput = (f, val='') => {
     if (f.type==='select') {
@@ -1687,23 +1694,38 @@ function timeAgo(dateStr) {
 /* ═══════════════════════════════════════════════════════
    ADMIN
 ════════════════════════════════════════════════════════ */
-async function loadAdminPanel(){await loadAdminUsers();}
+async function loadAdminPanel(){ await loadAdminUsers(); await loadAdminSettings(); }
 async function loadAdminUsers(){
   try{
     const users=await API.adminGetUsers();
     document.getElementById('users-table').innerHTML=`<table class="admin-table">
-      <thead><tr><th>Kullanıcı</th><th>E-posta</th><th>Rol</th><th>Durum</th><th>İşlem</th></tr></thead>
+      <thead><tr><th>Kullanıcı</th><th>E-posta</th><th>Rol</th><th>Durum</th><th>Telegram Chat ID</th><th>İşlem</th></tr></thead>
       <tbody>${(users||[]).map(u=>`<tr>
         <td><b>${u.full_name}</b><br><small class="muted">@${u.username}</small></td>
         <td>${u.email||'—'}</td>
         <td><span class="tag ${u.role==='admin'?'tag-red':'tag-blue'}">${u.role}</span></td>
         <td><span class="tag ${u.is_active?'tag-green':'tag-amber'}">${u.is_active?'Aktif':'Pasif'}</span></td>
+        <td>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="text" id="tg-input-${u.id}"
+              value="${u.telegram_chat_id||''}"
+              placeholder="Chat ID"
+              style="width:130px;padding:6px 10px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace;background:var(--bg)">
+            <button class="btn btn-sm btn-blue" onclick="adminSaveTelegram(${u.id})">Kaydet</button>
+          </div>
+          ${u.telegram_username?'<small class="muted" style="margin-top:3px;display:block">@'+u.telegram_username+'</small>':''}
+        </td>
         <td>${u.role!=='admin'?`
           <button class="btn btn-sm btn-outline" onclick="adminToggleUser(${u.id})">${u.is_active?'Pasif Yap':'Aktif Yap'}</button>
           <button class="btn btn-sm btn-danger" onclick="adminDeleteUser(${u.id})">Sil</button>
         `:'—'}</td>
       </tr>`).join('')}</tbody></table>`;
   }catch(e){showToast(e.message,'error');}
+}
+async function adminSaveTelegram(id){
+  const val=document.getElementById('tg-input-'+id)?.value||'';
+  try{await API.adminSetChatID(id,val);showToast('Chat ID kaydedildi.');}
+  catch(e){showToast(e.message,'error');}
 }
 async function adminToggleUser(id){try{await API.adminToggleUser(id);await loadAdminUsers();}catch(e){showToast(e.message,'error');}}
 async function adminDeleteUser(id){
@@ -1762,6 +1784,208 @@ document.getElementById('user-kaydet-btn').addEventListener('click', async()=>{
     await loadAdminUsers(); showToast('✅ Kullanıcı eklendi!');
   }catch(e){showToast(e.message,'error');}
 });
+
+
+/* ═══════════════════════════════════════════════════════
+   ADMIN SETTINGS
+════════════════════════════════════════════════════════ */
+async function loadAdminSettings() {
+  const cont = document.getElementById('admin-settings-content');
+  if (!cont) return;
+  try {
+    const s = await API.getAdminSettings();
+    renderAdminSettings(s);
+  } catch(e) { cont.innerHTML = `<div class="alert alert-error">Ayarlar yüklenemedi: ${e.message}</div>`; }
+}
+
+function renderAdminSettings(s) {
+  const cont = document.getElementById('admin-settings-content');
+  if (!cont) return;
+
+  function listEditor(key, label, items) {
+    const id = 'setting-'+key;
+    return `<div class="setting-group">
+      <div class="setting-group-header">
+        <span class="setting-group-title">${label}</span>
+        <button class="btn btn-sm btn-outline" onclick="addSettingItem('${id}')">+ Ekle</button>
+      </div>
+      <div class="setting-tags" id="${id}">
+        ${(items||[]).map(v=>`
+          <span class="setting-tag">
+            ${escHtml(v)}
+            <button onclick="removeSettingItem('${id}',this)" data-val="${escHtml(v)}">&times;</button>
+          </span>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  const allRequestFields = [
+    {key:'listing_type', label:'Satılık/Kiralık'},
+    {key:'property_type', label:'Mülk Tipi'},
+    {key:'district', label:'İlçe Tercihi'},
+    {key:'budget', label:'Bütçe'},
+    {key:'notes', label:'Notlar'},
+  ];
+  const activeCommon = (s.request_fields?.common||[]).map(f=>f.key);
+  const requestToggles = allRequestFields.map(f=>`
+    <div class="setting-toggle-row">
+      <span>${f.label}</span>
+      <button class="talep-toggle-btn${activeCommon.includes(f.key)?' on':''}"
+        id="rtoggle-${f.key}"
+        onclick="this.classList.toggle('on');this.querySelector('.talep-toggle-text').textContent=this.classList.contains('on')?'Açık':'Kapalı'">
+        <span class="talep-toggle-knob"></span>
+        <span class="talep-toggle-text">${activeCommon.includes(f.key)?'Açık':'Kapalı'}</span>
+      </button>
+    </div>`).join('');
+
+  const allListingFields = (s.all_fields || state.cfg?.listing_fields?.all_fields || [])
+    .filter(f=>!['title','price','description','notes','listing_type','property_type'].includes(f.key));
+  const byProp = s.request_fields?.by_property||{};
+  const propTypes = s.property_types||[];
+  const byPropToggles = propTypes.map(pt=>`
+    <div class="setting-group">
+      <div class="setting-group-header">
+        <span class="setting-group-title">${pt}</span>
+        <button class="btn btn-sm btn-outline" onclick="addCustomField('${pt}')">+ Özel Alan</button>
+      </div>
+      ${allListingFields.map(f=>`
+        <div class="setting-toggle-row">
+          <span>${f.label} <small class="muted">(${f.key})</small></span>
+          <button class="talep-toggle-btn${(byProp[pt]||[]).includes(f.key)?' on':''}"
+            id="byprop-${pt}-${f.key}"
+            onclick="this.classList.toggle('on');this.querySelector('.talep-toggle-text').textContent=this.classList.contains('on')?'Açık':'Kapalı'">
+            <span class="talep-toggle-knob"></span>
+            <span class="talep-toggle-text">${(byProp[pt]||[]).includes(f.key)?'Açık':'Kapalı'}</span>
+          </button>
+        </div>`).join('')}
+      <div id="custom-fields-${pt}"></div>
+    </div>`).join('');
+
+  cont.innerHTML = `
+    <div class="settings-grid">
+      <div class="settings-col">
+        <h3 class="settings-section-title">Listeler</h3>
+        ${listEditor('property_types', 'Mülk Tipleri', s.property_types)}
+        ${listEditor('listing_types', 'İlan Tipleri', s.listing_types)}
+        ${listEditor('districts', 'İlçeler', s.districts)}
+        ${listEditor('neighborhoods', 'Mahalleler', s.neighborhoods)}
+        ${listEditor('room_options', 'Oda Seçenekleri', s.room_options)}
+        ${listEditor('heating_options', 'Isıtma Seçenekleri', s.heating_options)}
+        ${listEditor('floor_options', 'Kat Seçenekleri', s.floor_options)}
+        ${listEditor('zoning_options', 'İmar Seçenekleri', s.zoning_options)}
+      </div>
+      <div class="settings-col">
+        <h3 class="settings-section-title">Talep Formu Alanları</h3>
+        <div class="setting-group">${requestToggles}</div>
+        <h3 class="settings-section-title" style="margin-top:16px">Mülke Göre Ek Alanlar</h3>
+        ${byPropToggles}
+      </div>
+    </div>
+    <div class="settings-footer">
+      <button class="btn btn-gold" onclick="saveAdminSettings()">Ayarları Kaydet</button>
+    </div>`;
+
+  state._adminSettings = s;
+}
+
+function addSettingItem(containerId) {
+  const val = prompt('Yeni değer:');
+  if (!val?.trim()) return;
+  const cont = document.getElementById(containerId);
+  if (!cont) return;
+  const span = document.createElement('span');
+  span.className = 'setting-tag';
+  span.innerHTML = `${escHtml(val.trim())}<button onclick="removeSettingItem('${containerId}',this)" data-val="${escHtml(val.trim())}">&times;</button>`;
+  cont.appendChild(span);
+}
+
+function removeSettingItem(containerId, btn) {
+  btn.closest('.setting-tag').remove();
+}
+
+function getSettingList(key) {
+  const cont = document.getElementById('setting-'+key);
+  if (!cont) return null;
+  return [...cont.querySelectorAll('.setting-tag')].map(t=>t.childNodes[0].textContent.trim());
+}
+
+function addCustomField(propType) {
+  const key   = prompt('Alan key (örn: balcony):')?.trim().toLowerCase().replace(/\s+/g,'_');
+  const label = prompt('Alan etiketi (örn: Balkon):')?.trim();
+  if (!key || !label) return;
+  const cont = document.getElementById('custom-fields-'+propType);
+  if (!cont) return;
+  const id = `byprop-${propType}-${key}`;
+  const row = document.createElement('div');
+  row.className = 'setting-toggle-row';
+  row.innerHTML = `
+    <span>${escHtml(label)} <small class="muted">(${escHtml(key)})</small></span>
+    <button class="talep-toggle-btn on" id="${id}"
+      onclick="this.classList.toggle('on');this.querySelector('.talep-toggle-text').textContent=this.classList.contains('on')?'Açık':'Kapalı'">
+      <span class="talep-toggle-knob"></span>
+      <span class="talep-toggle-text">Açık</span>
+    </button>`;
+  cont.appendChild(row);
+  const cfgFields = state.cfg?.listing_fields?.all_fields;
+  if (cfgFields && !cfgFields.find(f=>f.key===key)) {
+    cfgFields.push({key, label, type:'text', required:false});
+  }
+  if (state._adminSettings) {
+    if (!state._adminSettings.all_fields) state._adminSettings.all_fields = [];
+    if (!state._adminSettings.all_fields.find(f=>f.key===key)) {
+      state._adminSettings.all_fields.push({key, label, type:'text', required:false});
+    }
+  }
+}
+
+async function saveAdminSettings() {
+  const payload = {
+    property_types:  getSettingList('property_types'),
+    listing_types:   getSettingList('listing_types'),
+    districts:       getSettingList('districts'),
+    neighborhoods:   getSettingList('neighborhoods'),
+    room_options:    getSettingList('room_options'),
+    heating_options: getSettingList('heating_options'),
+    floor_options:   getSettingList('floor_options'),
+    zoning_options:  getSettingList('zoning_options'),
+  };
+
+  const allRequestFields = [
+    {key:'listing_type', label:'Satılık/Kiralık', type:'select', required:true, source:'listing_types'},
+    {key:'property_type', label:'Mülk Tipi', type:'select', required:true, source:'property_types'},
+    {key:'district', label:'İlçe Tercihi', type:'select', required:true, source:'districts'},
+    {key:'budget', label:'Bütçe', type:'number', required:true},
+    {key:'notes', label:'Notlar', type:'textarea', required:false},
+  ];
+  const baseFields = [
+    {key:'client_name', label:'Müşteri Adı', type:'text', required:true},
+    {key:'phone', label:'Telefon', type:'text', required:true},
+  ];
+  const activeCommon = allRequestFields.filter(f =>
+    document.getElementById('rtoggle-'+f.key)?.classList.contains('on')
+  );
+  payload.request_common = [...baseFields, ...activeCommon];
+
+  const byPropNew = {};
+  (payload.property_types||[]).forEach(pt => {
+    const active = [];
+    document.querySelectorAll(`[id^="byprop-${pt}-"]`).forEach(btn => {
+      if (btn.classList.contains('on')) {
+        active.push(btn.id.replace(`byprop-${pt}-`, ''));
+      }
+    });
+    byPropNew[pt] = active;
+  });
+  payload.request_by_property = byPropNew;
+  payload.all_fields = state.cfg?.listing_fields?.all_fields || [];
+
+  try {
+    await API.updateAdminSettings(payload);
+    showToast('Ayarlar kaydedildi!');
+    await loadConfig();
+    await loadAdminSettings();
+  } catch(e) { showToast(e.message,'error'); }
+}
 
 /* ═══════════════════════════════════════════════════════
    AUTH

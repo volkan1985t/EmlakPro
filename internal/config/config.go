@@ -131,6 +131,16 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// Save config'i belirtilen path'e yazar
+func Save(path string, cfg *Config) error {
+        f, err := os.Create(path)
+        if err != nil { return fmt.Errorf("config dosyası yazılamadı: %w", err) }
+        defer f.Close()
+        enc := json.NewEncoder(f)
+        enc.SetIndent("", "    ")
+        return enc.Encode(cfg)
+}
+
 // FieldByKey belirtilen key'e sahip field tanımını döner
 func (c *Config) FieldByKey(key string) *FieldDefinition {
 	for _, f := range c.ListingFields.AllFields {

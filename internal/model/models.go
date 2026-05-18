@@ -16,7 +16,8 @@ type User struct {
 	FullName       string    `json:"full_name" db:"full_name"`
 	Role           Role      `json:"role" db:"role"`
 	IsActive       bool      `json:"is_active" db:"is_active"`
-	TelegramChatID string    `json:"telegram_chat_id,omitempty" db:"telegram_chat_id"`
+	TelegramChatID   string    `json:"telegram_chat_id,omitempty" db:"telegram_chat_id"`
+	TelegramUsername string    `json:"telegram_username,omitempty" db:"telegram_username"`
 	NotifyTelegram bool      `json:"notify_telegram" db:"notify_telegram"`
 	CreatedAt      time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
@@ -31,6 +32,7 @@ type Listing struct {
 	IsListed     bool              `json:"is_listed" db:"is_listed"`
 	Status       string            `json:"status" db:"status"`
 	ClosingPrice *int64            `json:"closing_price,omitempty" db:"closing_price"`
+	CustomerID   int64             `json:"customer_id,omitempty" db:"customer_id"`
 	CoverImage   string            `json:"cover_image" db:"cover_image"`
 	Fields       map[string]string `json:"fields" db:"fields"`
 	CreatedAt    time.Time         `json:"created_at" db:"created_at"`
@@ -168,12 +170,14 @@ type CreateListingRequest struct {
 	Fields     map[string]string `json:"fields"`
 	CoverImage string            `json:"cover_image"`
 	Images     []string          `json:"images"`
+	CustomerID  int64             `json:"customer_id"`
 }
 type UpdateListingRequest struct {
 	Fields       map[string]string `json:"fields"`
 	CoverImage   string            `json:"cover_image"`
 	Images       []string          `json:"images"`
 	RemoveImages []int64           `json:"remove_images"`
+	CustomerID   int64             `json:"customer_id"`
 }
 type ToggleActiveRequest struct {
 	Status       string `json:"status"`

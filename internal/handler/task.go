@@ -184,14 +184,20 @@ func (h *TaskHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 
 // DELETE /api/tasks/{id}
 func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	isAdmin := middleware.IsAdmin(r.Context())
-	if !isAdmin {
-		jsonErr(w, "Yetki yok", http.StatusForbidden)
-		return
-	}
+	userID, _ := middleware.GetUserID(r.Context())
+	isAdmin   := middleware.IsAdmin(r.Context())
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		jsonErr(w, "Geçersiz ID", http.StatusBadRequest)
+		return
+	}
+	task, _ := h.repo.GetByID(id)
+	if task == nil {
+		jsonErr(w, "Görev bulunamadı", http.StatusNotFound)
+		return
+	}
+	if !isAdmin && task.CreatedBy != userID {
+		jsonErr(w, "Yetki yok", http.StatusForbidden)
 		return
 	}
 	h.repo.Delete(id)

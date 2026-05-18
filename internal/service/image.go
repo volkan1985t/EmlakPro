@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 	"image"
 	"image/jpeg"
 	_ "image/png"
@@ -169,11 +170,12 @@ func (s *ImageService) PathToURL(filePath string) string {
 	if filePath == "" {
 		return ""
 	}
-	absUpload, _ := filepath.Abs(s.cfg.App.UploadDir)
-	absFile, _ := filepath.Abs(filePath)
-	rel, err := filepath.Rel(absUpload, absFile)
-	if err != nil {
-		return ""
+	if strings.HasPrefix(filePath, "http://") || strings.HasPrefix(filePath, "https://") {
+		return filePath
 	}
-	return fmt.Sprintf("%s/uploads/%s", s.cfg.App.BaseURL, filepath.ToSlash(rel))
+	clean := filepath.ToSlash(filePath)
+	if idx := strings.Index(clean, "uploads/"); idx >= 0 {
+		clean = clean[idx+len("uploads/"):]
+	}
+	return fmt.Sprintf("%s/uploads/%s", s.cfg.App.BaseURL, clean)
 }

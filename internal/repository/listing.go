@@ -31,7 +31,7 @@ type ListFilter struct {
 const listingSelectCols = `
 	l.id, l.listing_no, l.user_id, l.share_token, l.is_active, l.is_listed,
 	l.status, l.closing_price, l.cover_image, l.fields, l.created_at, l.updated_at,
-	u.full_name as owner_name`
+	u.full_name as owner_name, COALESCE(l.customer_id, 0) as customer_id`
 
 func scanListing(row interface {
 	Scan(...interface{}) error
@@ -42,7 +42,7 @@ func scanListing(row interface {
 	err := row.Scan(
 		&l.ID, &l.ListingNo, &l.UserID, &token, &l.IsActive, &l.IsListed,
 		&l.Status, &l.ClosingPrice, &l.CoverImage, &fieldsJSON,
-		&l.CreatedAt, &l.UpdatedAt, &l.OwnerName,
+		&l.CreatedAt, &l.UpdatedAt, &l.OwnerName, &l.CustomerID,
 	)
 	if err != nil { return nil, err }
 	l.ShareToken = token
@@ -151,19 +151,23 @@ func (r *ListingRepository) Create(l *model.Listing) error {
 	fieldsJSON, err := json.Marshal(l.Fields)
 	if err != nil { return err }
 	return r.db.QueryRow(`
-		INSERT INTO listings (user_id, cover_image, fields)
-		VALUES ($1,$2,$3)
+		INSERT INTO listings (user_id, cover_image, fields, customer_id)
+		VALUES ($1,$2,$3,$4)
 		RETURNING id, listing_no, share_token, is_listed, status, created_at, updated_at`,
-		l.UserID, l.CoverImage, fieldsJSON,
+		l.UserID, l.CoverImage, fieldsJSON, l.CustomerID,
 	).Scan(&l.ID, &l.ListingNo, &l.ShareToken, &l.IsListed, &l.Status, &l.CreatedAt, &l.UpdatedAt)
 }
 
 func (r *ListingRepository) Update(l *model.Listing) error {
 	fieldsJSON, err := json.Marshal(l.Fields)
 	if err != nil { return err }
-	_, err = r.db.Exec(`
-		UPDATE listings SET cover_image=$1, fields=$2, updated_at=NOW() WHERE id=$3`,
-		l.CoverImage, fieldsJSON, l.ID)
+	if l.CustomerID > 0 {
+		_, err = r.db.Exec(`UPDATE listings SET cover_image=$1, fields=$2, customer_id=$3, updated_at=NOW() WHERE id=$4`,
+			l.CoverImage, fieldsJSON, l.CustomerID, l.ID)
+	} else {
+		_, err = r.db.Exec(`UPDATE listings SET cover_image=$1, fields=$2, updated_at=NOW() WHERE id=$3`,
+			l.CoverImage, fieldsJSON, l.ID)
+	}
 	return err
 }
 

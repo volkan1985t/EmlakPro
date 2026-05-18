@@ -145,7 +145,7 @@
             <span>Bekliyor</span>
             <span class="kanban-count" id="cnt-bekliyor">0</span>
           </div>
-          <div class="kanban-cards" id="cards-bekliyor"></div>
+          <div class="kanban-cards" id="cards-bekliyor" data-status="bekliyor"></div>
         </div>
         <div class="kanban-col" id="col-devam_ediyor" data-status="devam_ediyor">
           <div class="kanban-col-header">
@@ -153,7 +153,7 @@
             <span>Devam Ediyor</span>
             <span class="kanban-count" id="cnt-devam_ediyor">0</span>
           </div>
-          <div class="kanban-cards" id="cards-devam_ediyor"></div>
+          <div class="kanban-cards" id="cards-devam_ediyor" data-status="devam_ediyor"></div>
         </div>
         <div class="kanban-col" id="col-tamamlandi" data-status="tamamlandi">
           <div class="kanban-col-header">
@@ -161,7 +161,7 @@
             <span>Tamamlandı</span>
             <span class="kanban-count" id="cnt-tamamlandi">0</span>
           </div>
-          <div class="kanban-cards" id="cards-tamamlandi"></div>
+          <div class="kanban-cards" id="cards-tamamlandi" data-status="tamamlandi"></div>
         </div>
         <div class="kanban-col" id="col-iptal" data-status="iptal">
           <div class="kanban-col-header">
@@ -169,7 +169,7 @@
             <span>İptal</span>
             <span class="kanban-count" id="cnt-iptal">0</span>
           </div>
-          <div class="kanban-cards" id="cards-iptal"></div>
+          <div class="kanban-cards" id="cards-iptal" data-status="iptal"></div>
         </div>
       </div>
 
@@ -209,6 +209,7 @@
         <button class="admin-tab active" data-tab="admin-users">👥 Kullanıcılar</button>
         <button class="admin-tab" data-tab="admin-listings">📋 Tüm İlanlar</button>
         <button class="admin-tab" data-tab="admin-requests">🎯 Tüm Talepler</button>
+        <button class="admin-tab" data-tab="admin-settings">⚙️ Ayarlar</button>
       </div>
       <div class="admin-panel active" id="admin-users">
         <div class="toolbar">
@@ -220,6 +221,11 @@
       <div class="admin-panel" id="admin-listings"><div id="admin-listings-list"></div></div>
       <div class="admin-panel" id="admin-requests"><div id="admin-requests-list"></div></div>
     </div>
+      <div class="admin-panel" id="admin-settings">
+        <div id="admin-settings-content">
+          <div class="empty-state"><div class="big-icon">⚙️</div><p>Yükleniyor...</p></div>
+        </div>
+      </div>
 
   </div>
 </div>
@@ -229,9 +235,12 @@
   <div class="modal modal-lg">
     <div class="modal-header">
       <h3 id="detail-title">İlan Detayı</h3>
-      <div style="display:flex;gap:8px;align-items:center">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" id="detail-malik-btn" style="display:none">👤 Malik</button>
         <button class="btn btn-outline btn-sm" id="detail-history-btn">📋 Tarihçe</button>
         <button class="btn btn-outline btn-sm" id="detail-share-btn">🔗 Paylaş</button>
+        <button class="btn btn-outline btn-sm" id="detail-listed-btn">👁 Gizle</button>
+        <button class="btn btn-outline btn-sm" id="detail-toggle-btn">⏸ Pasif</button>
         <button class="btn btn-blue btn-sm" id="detail-edit-btn">✏️ Düzenle</button>
         <button class="close-btn" id="close-detail">×</button>
       </div>
@@ -241,9 +250,7 @@
 </div>
 
 <!-- LIGHTBOX -->
-<div id="lightbox" class="lightbox">
-  <img id="lightbox-img" src="" alt="">
-</div>
+
 
 <!-- İLAN MODAL -->
 <div class="overlay" id="ilan-overlay">
@@ -389,7 +396,7 @@
 <div class="overlay" id="link-listing-overlay">
   <div class="modal modal-sm">
     <div class="modal-header">
-      <h3>İlan Bağla</h3>
+      <h3 id="link-modal-title">İlan Bağla</h3>
       <button class="close-btn" id="close-link-listing">×</button>
     </div>
     <div class="form-group">
@@ -482,6 +489,7 @@
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
         <button class="btn btn-blue btn-sm" id="gd-edit-btn">✏️ Düzenle</button>
+        <button class="btn btn-danger btn-sm admin-only" id="gd-delete-btn" style="display:none">🗑 Sil</button>
         <button class="close-btn" id="close-gorev-detail">×</button>
       </div>
     </div>
@@ -553,8 +561,8 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/static/js/api.js"></script>
-<script src="/static/js/app.js"></script>
+<script src="/static/js/api.js?v=202605171843"></script>
+<script src="/static/js/app.js?v=202605171843"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -564,5 +572,11 @@ if ('serviceWorker' in navigator) {
   });
 }
 </script>
+<div id="lightbox" class="lightbox">
+  <button id="lb-prev" class="lb-nav lb-prev">&#8249;</button>
+  <img id="lightbox-img" src="" alt="">
+  <button id="lb-next" class="lb-nav lb-next">&#8250;</button>
+  <button id="lb-close" class="lb-close">&#x2715;</button>
+</div>
 </body>
 </html>
