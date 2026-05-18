@@ -109,6 +109,31 @@ function formatDisplayPrice(val) {
   return isNaN(n) ? '' : n.toLocaleString('tr-TR');
 }
 
+function buildCustomerSelectBlock(selectedId) {
+  return `<div class="form-group">
+    <label>Müşteri <span class="muted">(opsiyonel)</span></label>
+    <select id="f-customer_id">
+      <option value="">Müşteri seçin...</option>
+    </select>
+    <small class="muted" style="margin-top:4px;display:block">Müşteri bilgileri gizli tutulur</small>
+  </div>`;
+}
+async function fillCustomerDropdown(selectedId) {
+  try {
+    const customers = state.customers.length ? state.customers : await API.getCustomers() || [];
+    const sel = document.getElementById('f-customer_id');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Müşteri seçin...</option>';
+    customers.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name + ' · ' + (c.phone||'');
+      if (c.id === selectedId) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } catch(e) { console.error('Müşteri yüklenemedi', e); }
+}
+
 function showToast(msg, type='info') {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -393,10 +418,98 @@ async function openDetailModal(id) {
       ${gallery}
       ${il.fields?.description?`<div class="detail-desc"><b>Açıklama:</b><p>${il.fields.description}</p></div>`:''}
     `;
+    // Malik butonu
+    const malikBtn = document.getElementById('detail-malik-btn');
+    if (malikBtn) {
+      if (il.customer_id && (API.isAdmin() || il.user_id===API.getUserID())) {
+        malikBtn.style.display = '';
+        malikBtn.onclick = () => goToMalik(il.customer_id);
+      } else {
+        malikBtn.style.display = 'none';
+      }
+    }
     document.getElementById('detail-overlay').classList.add('open');
   } catch(e) { showToast(e.message,'error'); }
 }
 
+async function toggleCrmAccordion(id, e) {
+  if (e && e.target && e.target.closest && e.target.closest('.icon-btn')) return;
+  const acc  = document.getElementById('crm-acc-'+id);
+  const chev = document.getElementById('chev-'+id);
+  if (!acc) return;
+  const isOpen = acc.style.display !== 'none';
+  if (isOpen) { acc.style.display='none'; if(chev) chev.textContent='▸'; return; }
+  acc.style.display = 'block';
+  if (chev) chev.textContent = '▾';
+  try {
+    const listings = await API.getCustomerListings(id)||[];
+    const ilanListHTML = listings.length
+      ? listings.map(il=>`
+          <div class="crm-acc-ilan">
+            ${il.cover_image?`<img src="${il.cover_image}" class="crm-acc-thumb" alt="">`:'<div class="crm-acc-thumb crm-acc-nophoto">🏠</div>'}
+            <div class="crm-acc-info">
+              <div class="crm-acc-title">${il.fields?.title||'—'} <span class="mini-no">#${il.listing_no||''}</span></div>
+              <div class="crm-acc-meta">${il.fields?.district||''} · ${fiyatFormat(il.fields?.price_max||il.fields?.price)}</div>
+            </div>
+            <button class="btn btn-sm btn-danger" onclick="doCrmUnlink(${id},${il.id},event)">Kaldır</button>
+          </div>`).join('')
+      : '<div class="crm-acc-empty">Bağlı ilan yok.</div>';
+    acc.innerHTML = ilanListHTML;
+  } catch(e) { acc.innerHTML='<div class="crm-acc-empty">Yüklenemedi.</div>'; }
+}
+
+async function doCrmUnlink(customerId, listingId, e) {
+  e.stopPropagation();
+  if (!confirm('Bağlantıyı kaldırmak istiyor musunuz?')) return;
+  try {
+    await API.unlinkListing(customerId, listingId);
+    showToast('Bağlantı kaldırıldı.');
+    const acc = document.getElementById('crm-acc-'+customerId);
+    if (!acc || acc.style.display==='none') return;
+    const listings = await API.getCustomerListings(customerId)||[];
+    if (!listings.length) { acc.innerHTML='<div class="crm-acc-empty">Bağlı ilan yok.</div>'; return; }
+    acc.innerHTML = listings.map(il=>`
+      <div class="crm-acc-ilan">
+        ${il.cover_image?`<img src="${il.cover_image}" class="crm-acc-thumb" alt="">`:'<div class="crm-acc-thumb crm-acc-nophoto">🏠</div>'}
+        <div class="crm-acc-info">
+          <div class="crm-acc-title">${il.fields?.title||'—'} <span class="mini-no">#${il.listing_no||''}</span></div>
+          <div class="crm-acc-meta">${il.fields?.district||''} · ${fiyatFormat(il.fields?.price_max||il.fields?.price)}</div>
+        </div>
+        <button class="btn btn-sm btn-danger" onclick="doCrmUnlink(${customerId},${il.id},event)">Kaldır</button>
+      </div>`).join('');
+  } catch(err) { showToast(err.message,'error'); }
+}
+
+
+function openCrmLinkListing(customerId, e) {
+  if (e) e.stopPropagation();
+  state.viewCustomerId = customerId;
+  state._linkFromListingId = null;
+  const sel = document.getElementById('link-listing-select');
+  sel.innerHTML = '<option value="">Seçin...</option>' +
+    state.listings
+      .filter(il => il.is_active && !il.customer_id && (API.isAdmin() || il.user_id === API.getUserID()))
+      .map(il=>`<option value="${il.id}">#${il.listing_no} ${il.fields?.title||''}</option>`).join('');
+  document.getElementById('link-listing-note').value = '';
+  document.getElementById('link-listing-overlay').classList.add('open');
+}
+
+function goToMalik(customerId) {
+  document.getElementById('detail-overlay').classList.remove('open');
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelector('.nav-btn[data-page="musteriler"]')?.classList.add('active');
+  document.getElementById('page-musteriler')?.classList.add('active');
+  loadCustomers().then(()=>{
+    setTimeout(()=>{
+      const acc = document.getElementById('crm-acc-'+customerId);
+      if (acc) {
+        acc.closest('.crm-item')?.scrollIntoView({behavior:'smooth',block:'center'});
+        if (acc.style.display==='none') toggleCrmAccordion(customerId,{target:{closest:()=>null}});
+      }
+    }, 300);
+  });
+}
 function openLightbox(src) {
   document.getElementById('lightbox-img').src = src;
   document.getElementById('lightbox').classList.add('open');
@@ -540,23 +653,18 @@ function renderIlanFormFields(allFields, ilan, isAdmin, propType) {
       </div>`;
     }).join('');
 
-  const priceMinVal = ilan?.fields?.price_min||'';
-  const priceMaxVal = ilan?.fields?.price_max||'';
+  const priceVal = ilan?.fields?.price||ilan?.fields?.price_max||'';
   const priceBlock = `
     <div class="form-group">
-      <label>Fiyat Aralığı (₺)</label>
-      <div class="price-range-row">
-        <input id="f-price_min" type="text" inputmode="numeric"
-          value="${formatDisplayPrice(priceMinVal)}" data-raw="${priceMinVal}"
-          placeholder="En az" oninput="formatPriceInput(this)">
-        <span class="price-range-sep">—</span>
-        <input id="f-price_max" type="text" inputmode="numeric"
-          value="${formatDisplayPrice(priceMaxVal)}" data-raw="${priceMaxVal}"
-          placeholder="En fazla" oninput="formatPriceInput(this)">
-      </div>
+      <label>Fiyat (₺) <span class="req">*</span></label>
+      <input id="f-price" type="text" inputmode="numeric"
+        value="${formatDisplayPrice(priceVal)}" data-raw="${priceVal}"
+        placeholder="Örn: 4.500.000" oninput="formatPriceInput(this)">
     </div>`;
 
-  document.getElementById('ilan-form-body').innerHTML = html + priceBlock;
+  const customerBlock = buildCustomerSelectBlock(ilan?.customer_id);
+  document.getElementById('ilan-form-body').innerHTML = html + priceBlock + customerBlock;
+  fillCustomerDropdown(ilan?.customer_id || null);
 
   document.getElementById('f-property_type')?.addEventListener('change', function() {
     updateIlanFormForPropType(this.value, allFields, isAdmin);
@@ -584,18 +692,20 @@ document.getElementById('kaydet-btn').addEventListener('click', async ()=>{
     const el = document.getElementById('f-'+f.key);
     if (el) fields[f.key] = el.value;
   });
-  fields.price_min = getRawPrice('f-price_min');
-  fields.price_max = getRawPrice('f-price_max');
-  fields.price = fields.price_max || fields.price_min;
+  fields.price = getRawPrice("f-price");
+  fields.price_max = fields.price;
+  fields.price_min = "";
 
   if (!fields.title) { showToast('Başlık zorunludur','error'); return; }
-  if (!fields.price_min&&!fields.price_max) { showToast('En az bir fiyat giriniz','error'); return; }
+  if (!fields.price) { showToast("Fiyat zorunludur","error"); return; }
 
   try {
+    const cid = parseInt(document.getElementById("f-customer_id")?.value)||0;
     const payload = {
       fields, cover_image: state.coverPath,
       images: state.galleryPaths.map(g=>g.path),
       remove_images: state.removedImageIds,
+      customer_id: cid,
     };
     if (state.editListingId) {
       await API.updateListing(state.editListingId, payload);
@@ -967,24 +1077,34 @@ function renderCustomers() {
   list.innerHTML = state.customers.map((c, idx)=>{
     const col = colors[idx % colors.length];
     const harf = (c.name||'M')[0].toUpperCase();
-    return `<div class="crm-card${c.is_active?'':' crm-passive'}" onclick="openCustomerDetail(${c.id})">
-      <div class="crm-avatar" style="background:${col}22;color:${col}">${harf}</div>
-      <div class="crm-info">
-        <div class="crm-name">${c.name}</div>
-        <div class="crm-meta">
-          ${c.phone?`📞 ${c.phone}`:''}
-          ${c.email?` · 📧 ${c.email}`:''}
-          ${c.source?` · <span class="tag tag-sm tag-blue">${c.source}</span>`:''}
+    return `<div class="crm-item${c.is_active?'':' crm-passive'}">
+      <div class="crm-card" onclick="toggleCrmAccordion(${c.id},event)">
+        <div class="crm-avatar" style="background:${col}22;color:${col}">${harf}</div>
+        <div class="crm-info">
+          <div class="crm-name">${c.name}</div>
+          <div class="crm-meta">
+            ${c.phone?`📞 ${c.phone}`:''}
+            ${c.email?` · 📧 ${c.email}`:''}
+            ${c.source?` · <span class="tag tag-sm tag-blue">${c.source}</span>`:''}
+          </div>
+          ${c.notes?`<div class="crm-notes muted">${c.notes.slice(0,80)}${c.notes.length>80?'…':''}</div>`:''}
         </div>
-        ${c.notes?`<div class="crm-notes muted">${c.notes.slice(0,80)}${c.notes.length>80?'…':''}</div>`:''}
+        <div class="crm-actions">
+          <button class="btn btn-sm btn-outline" onclick="openCrmLinkListing(${c.id},event)">+ İlan Bağla</button>
+          <button class="icon-btn icon-btn-edit" onclick="openEditCustomer(${c.id},event)">✏️</button>
+          <button class="icon-btn" onclick="doToggleCustomer(${c.id},event)" title="${c.is_active?'Pasife Al':'Aktif Et'}">${c.is_active?'⏸':'▶️'}</button>
+          <button class="icon-btn icon-btn-delete" onclick="doDeleteCustomer(${c.id},event)">🗑️</button>
+          <span class="crm-chevron" id="chev-${c.id}">▸</span>
+        </div>
       </div>
-      <div class="crm-actions">
-        <button class="icon-btn icon-btn-edit" onclick="openEditCustomer(${c.id},event)">✏️</button>
-        <button class="icon-btn" onclick="doToggleCustomer(${c.id},event)" title="${c.is_active?'Pasife Al':'Aktif Et'}">${c.is_active?'⏸':'▶️'}</button>
-        <button class="icon-btn icon-btn-delete" onclick="doDeleteCustomer(${c.id},event)">🗑️</button>
+      <div class="crm-accordion" id="crm-acc-${c.id}" style="display:block">
+        <div class="crm-acc-loading">Yükleniyor...</div>
       </div>
     </div>`;
   }).join('');
+  setTimeout(() => {
+    state.customers.forEach(c => { toggleCrmAccordion(c.id, {target:{closest:()=>null}}); });
+  }, 100);
 }
 
 document.getElementById('musteri-search')?.addEventListener('input', loadCustomers);
@@ -1101,7 +1221,9 @@ async function doUnlinkListing(customerId, listingId) {
 document.getElementById('link-listing-btn').addEventListener('click', ()=>{
   const sel = document.getElementById('link-listing-select');
   sel.innerHTML = '<option value="">Seçin...</option>' +
-    state.listings.map(il=>`<option value="${il.id}">#${il.listing_no} ${il.fields?.title||''}</option>`).join('');
+    state.listings
+      .filter(il => il.is_active && !il.customer_id && (API.isAdmin() || il.user_id === API.getUserID()))
+      .map(il=>`<option value="${il.id}">#${il.listing_no} ${il.fields?.title||''}</option>`).join('');
   document.getElementById('link-listing-note').value = '';
   document.getElementById('link-listing-overlay').classList.add('open');
 });

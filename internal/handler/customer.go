@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -135,7 +136,7 @@ func (h *CustomerHandler) GetListings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	listings, err := h.customerRepo.GetLinkedListings(id)
-	if err != nil { jsonErr(w, "İlanlar yüklenemedi", http.StatusInternalServerError); return }
+	if err != nil { log.Printf("[ERROR] GetLinkedListings: %v", err); jsonErr(w, "İlanlar yüklenemedi", http.StatusInternalServerError); return }
 	if listings == nil { listings = []model.Listing{} }
 	for i := range listings {
 		listings[i].CoverImage = h.imageSvc.PathToURL(listings[i].CoverImage)

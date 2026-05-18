@@ -283,3 +283,12 @@ func (r *ListingRepository) GetHistory(listingID int64) ([]model.ListingHistory,
 	}
 	return history, nil
 }
+
+func (r *ListingRepository) ExistsByCustomerID(customerID, excludeListingID int64) (bool, error) {
+	var count int
+	err := r.db.QueryRow(
+		`SELECT COUNT(*) FROM listings WHERE customer_id=$1 AND is_active=true AND id!=$2`,
+		customerID, excludeListingID,
+	).Scan(&count)
+	return count > 0, err
+}

@@ -111,31 +111,27 @@ func (r *CustomerRepository) IsOwner(customerID, userID int64) (bool, error) {
 }
 
 func (r *CustomerRepository) LinkListing(customerID, listingID int64, note string) error {
-	_, err := r.db.Exec(`
-		INSERT INTO customer_listings (customer_id, listing_id, note)
-		VALUES ($1,$2,$3)
-		ON CONFLICT (customer_id, listing_id) DO UPDATE SET note=EXCLUDED.note`,
-		customerID, listingID, note)
+	var existingCustomer int64
+	r.db.QueryRow(`SELECT COALESCE(customer_id,0) FROM listings WHERE id=$1`, listingID).Scan(&existingCustomer)
+	if existingCustomer > 0 && existingCustomer != customerID {
+		return fmt.Errorf("bu ilan zaten baska bir musteriye bagli")
+	}
+	_, err := r.db.Exec(`UPDATE listings SET customer_id=$1, updated_at=NOW() WHERE id=$2`, customerID, listingID)
 	return err
 }
-
 func (r *CustomerRepository) UnlinkListing(customerID, listingID int64) error {
-	r.db.Exec(`DELETE FROM customer_listings WHERE customer_id=$1 AND listing_id=$2`, customerID, listingID)
-	r.db.Exec(`UPDATE listings SET customer_id=NULL WHERE id=$1 AND customer_id=$2`, listingID, customerID)
-	return nil
+	_, err := r.db.Exec(`UPDATE listings SET customer_id=NULL, updated_at=NOW() WHERE id=$1 AND customer_id=$2`, listingID, customerID)
+	return err
 }
-
 func (r *CustomerRepository) GetLinkedListings(customerID int64) ([]model.Listing, error) {
 	rows, err := r.db.Query(fmt.Sprintf(`
-		SELECT DISTINCT ON (l.id) %s
+		SELECT %s
 		FROM listings l
 		JOIN users u ON u.id = l.user_id
-		LEFT JOIN customer_listings cl ON cl.listing_id = l.id
-		WHERE l.customer_id = $1 OR cl.customer_id = $1
-		ORDER BY l.id, l.created_at DESC`, listingSelectCols), customerID)
+		WHERE l.customer_id = $1
+		ORDER BY l.created_at DESC`, listingSelectCols), customerID)
 	if err != nil { return nil, err }
 	defer rows.Close()
-
 	var listings []model.Listing
 	for rows.Next() {
 		l, err := scanListing(rows)

@@ -110,6 +110,7 @@ func (h *ListingHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.Fields["title"] == "" { jsonErr(w, "Başlık zorunludur", http.StatusBadRequest); return }
 	if req.Fields["price"] == ""  { jsonErr(w, "Fiyat zorunludur",  http.StatusBadRequest); return }
 
+
 	listing := &model.Listing{
 		UserID:     userID,
 		CoverImage: req.CoverImage,
@@ -117,7 +118,7 @@ func (h *ListingHandler) Create(w http.ResponseWriter, r *http.Request) {
 		IsActive:   true,
 		IsListed:   true,
 		Status:     "aktif",
-			CustomerID: req.CustomerID,
+		CustomerID: req.CustomerID,
 	}
 	if err := h.listingRepo.Create(listing); err != nil {
 		log.Printf("Create listing error: %v", err)
