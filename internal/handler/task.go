@@ -252,7 +252,7 @@ func (h *TaskHandler) UploadImage(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	result, err := h.imageSvc.SaveGallery(file, header.Filename)
+	result, err := h.imageSvc.SaveGallery(file, header.Filename, "tasks", 0)
 	if err != nil {
 		jsonErr(w, "Resim kaydedilemedi", http.StatusInternalServerError)
 		return

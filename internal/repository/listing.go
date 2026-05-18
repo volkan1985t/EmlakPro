@@ -158,6 +158,12 @@ func (r *ListingRepository) Create(l *model.Listing) error {
 	).Scan(&l.ID, &l.ListingNo, &l.ShareToken, &l.IsListed, &l.Status, &l.CreatedAt, &l.UpdatedAt)
 }
 
+
+func (r *ListingRepository) UpdateCoverImage(id int64, path string) error {
+	_, err := r.db.Exec(`UPDATE listings SET cover_image=$1, updated_at=NOW() WHERE id=$2`, path, id)
+	return err
+}
+
 func (r *ListingRepository) Update(l *model.Listing) error {
 	fieldsJSON, err := json.Marshal(l.Fields)
 	if err != nil { return err }

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/volkan1985t/EmlakPro/internal/config"
 	"github.com/volkan1985t/EmlakPro/internal/service"
@@ -16,9 +17,15 @@ func NewUploadHandler(cfg *config.Config, imageSvc *service.ImageService) *Uploa
 	return &UploadHandler{cfg: cfg, imageSvc: imageSvc}
 }
 
-// POST /api/upload/cover — vitrin resmi (1920x1080, tek dosya)
+func getPropTypeAndNo(r *http.Request) (string, int64) {
+	propType := r.FormValue("prop_type")
+	listingNo, _ := strconv.ParseInt(r.FormValue("listing_no"), 10, 64)
+	return propType, listingNo
+}
+
+// POST /api/upload/cover
 func (h *UploadHandler) Cover(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 20<<20) // 20 MB limit
+	r.Body = http.MaxBytesReader(w, r.Body, 20<<20)
 	if err := r.ParseMultipartForm(20 << 20); err != nil {
 		jsonErr(w, "Dosya çok büyük (maks 20MB)", http.StatusBadRequest)
 		return
@@ -31,7 +38,8 @@ func (h *UploadHandler) Cover(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	result, err := h.imageSvc.SaveCover(file, header.Filename)
+	propType, listingNo := getPropTypeAndNo(r)
+	result, err := h.imageSvc.SaveCover(file, header.Filename, propType, listingNo)
 	if err != nil {
 		jsonErr(w, "Resim kaydedilemedi: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -46,7 +54,7 @@ func (h *UploadHandler) Cover(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// POST /api/upload/gallery — galeri resmi (1920x1080, tek dosya, çok kez çağrılır)
+// POST /api/upload/gallery
 func (h *UploadHandler) Gallery(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 20<<20)
 	if err := r.ParseMultipartForm(20 << 20); err != nil {
@@ -61,7 +69,8 @@ func (h *UploadHandler) Gallery(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	result, err := h.imageSvc.SaveGallery(file, header.Filename)
+	propType, listingNo := getPropTypeAndNo(r)
+	result, err := h.imageSvc.SaveGallery(file, header.Filename, propType, listingNo)
 	if err != nil {
 		jsonErr(w, "Resim kaydedilemedi: "+err.Error(), http.StatusInternalServerError)
 		return

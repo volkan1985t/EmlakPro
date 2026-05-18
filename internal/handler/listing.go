@@ -125,7 +125,26 @@ func (h *ListingHandler) Create(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "İlan oluşturulamadı: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	for i, imgPath := range req.Images {
+	propType := req.Fields["property_type"]
+
+	// Resimleri tmp'den ilan no klasorune tasи
+	newCover := h.imageSvc.MoveFromTmp(req.CoverImage, propType, listing.ListingNo)
+	if newCover != "" {
+		listing.CoverImage = newCover
+		h.listingRepo.UpdateCoverImage(listing.ID, newCover)
+	}
+
+	var newImages []string
+	for _, imgPath := range req.Images {
+		newPath := h.imageSvc.MoveFromTmp(imgPath, propType, listing.ListingNo)
+		if newPath != "" {
+			newImages = append(newImages, newPath)
+		} else {
+			newImages = append(newImages, imgPath)
+		}
+	}
+
+	for i, imgPath := range newImages {
 		h.listingRepo.AddImage(listing.ID, imgPath, i)
 	}
 	h.listingRepo.AddHistory(listing.ID, userID, "created", "aktif", nil)

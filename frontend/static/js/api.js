@@ -115,12 +115,18 @@ const API = (() => {
   }
 
   // -- Upload --
-  async function uploadCover(file) {
-    const fd = new FormData(); fd.append('cover', file);
+  async function uploadCover(file, propType='', listingNo=0) {
+    const fd = new FormData();
+    fd.append('cover', file);
+    fd.append('prop_type', propType);
+    fd.append('listing_no', String(listingNo));
     return request('POST', '/upload/cover', fd, true);
   }
-  async function uploadGallery(file) {
-    const fd = new FormData(); fd.append('image', file);
+  async function uploadGallery(file, propType='', listingNo=0) {
+    const fd = new FormData();
+    fd.append('image', file);
+    fd.append('prop_type', propType);
+    fd.append('listing_no', String(listingNo));
     return request('POST', '/upload/gallery', fd, true);
   }
 

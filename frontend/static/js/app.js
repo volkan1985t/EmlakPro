@@ -686,6 +686,10 @@ function updateIlanFormForPropType(propType, allFields, isAdmin) {
 }
 
 document.getElementById('kaydet-btn').addEventListener('click', async ()=>{
+  const btn = document.getElementById('kaydet-btn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Kaydediliyor...';
   const fields = {};
   (state.cfg?.listing_fields?.all_fields||[]).forEach(f => {
     if (f.key==='price') return;
@@ -696,8 +700,9 @@ document.getElementById('kaydet-btn').addEventListener('click', async ()=>{
   fields.price_max = fields.price;
   fields.price_min = "";
 
-  if (!fields.title) { showToast('Başlık zorunludur','error'); return; }
-  if (!fields.price) { showToast("Fiyat zorunludur","error"); return; }
+  if (!fields.property_type) { showToast('Mülk tipi zorunludur','error'); btn.disabled=false; btn.textContent=originalText; return; }
+  if (!fields.title) { showToast('Başlık zorunludur','error'); btn.disabled=false; btn.textContent=originalText; return; }
+  if (!fields.price) { showToast("Fiyat zorunludur","error"); btn.disabled=false; btn.textContent=originalText; return; }
 
   try {
     const cid = parseInt(document.getElementById("f-customer_id")?.value)||0;
@@ -717,6 +722,7 @@ document.getElementById('kaydet-btn').addEventListener('click', async ()=>{
     closeIlanModal();
     await loadListings();
   } catch(e) { showToast(e.message,'error'); }
+  finally { btn.disabled = false; btn.textContent = originalText; }
 });
 
 /* ─── Cover Upload ────────────────────────────────────────── */
@@ -725,7 +731,8 @@ document.getElementById('cover-input').addEventListener('change', async function
   const file=this.files[0]; if(!file) return;
   try {
     showToast('Resim yükleniyor...','info');
-    const res = await API.uploadCover(file);
+    const propType = document.getElementById('f-property_type')?.value||'';
+    const res = await API.uploadCover(file, propType, state.editListingId||0);
     state.coverPath=res.path; state.coverURL=res.url;
     renderCoverPreview(res.url); showToast('Vitrin resmi yüklendi.');
   } catch(e) { showToast(e.message,'error'); }
@@ -756,9 +763,10 @@ document.getElementById('gallery-zone').addEventListener('click',e=>{
 });
 document.getElementById('gallery-input').addEventListener('change', async function(){
   const files=Array.from(this.files);
-  const maxLeft=12-state.galleryPaths.length-state.galleryExisting.length;
+  const propType2 = document.getElementById('f-property_type')?.value||'';
+  const maxLeft=25-state.galleryPaths.length-state.galleryExisting.length;
   for (const file of files.slice(0,maxLeft)) {
-    try { const res=await API.uploadGallery(file); state.galleryPaths.push({path:res.path,url:res.url}); renderGalleryPreview(); }
+    try { const res=await API.uploadGallery(file, propType2, state.editListingId||0); state.galleryPaths.push({path:res.path,url:res.url}); renderGalleryPreview(); }
     catch(e) { showToast(e.message,'error'); }
   }
   if(files.length>maxLeft) showToast(`En fazla ${maxLeft} resim daha eklenebilir.`,'error');

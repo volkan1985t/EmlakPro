@@ -78,7 +78,7 @@ func main() {
 	listingHandler.SetNotificationDeps(notifySvc, userRepo, requestRepo)
 	uploadHandler    := handler.NewUploadHandler(cfg, imageSvc)
 	requestHandler   := handler.NewRequestHandler(cfg, requestRepo)
-	adminHandler     := handler.NewAdminHandler(cfg, userRepo, listingRepo, requestRepo)
+	adminHandler     := handler.NewAdminHandler(cfg, userRepo, listingRepo, requestRepo, imageSvc)
 	configHandler    := handler.NewConfigHandler(cfg)
 	customerHandler  := handler.NewCustomerHandler(cfg, customerRepo, listingRepo, imageSvc)
 	dashboardHandler := handler.NewDashboardHandler(db)

@@ -8,6 +8,7 @@ import (
 	"github.com/volkan1985t/EmlakPro/internal/config"
 	"github.com/volkan1985t/EmlakPro/internal/model"
 	"github.com/volkan1985t/EmlakPro/internal/repository"
+	"github.com/volkan1985t/EmlakPro/internal/service"
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -17,11 +18,13 @@ type AdminHandler struct {
 	userRepo    *repository.UserRepository
 	listingRepo *repository.ListingRepository
 	requestRepo *repository.RequestRepository
+	imageSvc    *service.ImageService
 }
 
 func NewAdminHandler(cfg *config.Config, userRepo *repository.UserRepository,
-	listingRepo *repository.ListingRepository, requestRepo *repository.RequestRepository) *AdminHandler {
-	return &AdminHandler{cfg: cfg, userRepo: userRepo, listingRepo: listingRepo, requestRepo: requestRepo}
+	listingRepo *repository.ListingRepository, requestRepo *repository.RequestRepository,
+	imageSvc *service.ImageService) *AdminHandler {
+	return &AdminHandler{cfg: cfg, userRepo: userRepo, listingRepo: listingRepo, requestRepo: requestRepo, imageSvc: imageSvc}
 }
 
 // ── Kullanıcı Yönetimi ────────────────────────────────────────────────────────
@@ -192,9 +195,16 @@ func (h *AdminHandler) DeleteListing(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "Geçersiz ID", http.StatusBadRequest)
 		return
 	}
+	// Silmeden once ilan bilgilerini al
+	listing, _ := h.listingRepo.GetByID(id)
 	if err := h.listingRepo.Delete(id); err != nil {
 		jsonErr(w, "İlan silinemedi", http.StatusInternalServerError)
 		return
+	}
+	// Klasor temizle (original korunur)
+	if listing != nil && h.imageSvc != nil {
+		propType := listing.Fields["property_type"]
+		h.imageSvc.DeleteListingFiles(propType, listing.ListingNo)
 	}
 	jsonOK(w, map[string]string{"message": "İlan silindi"})
 }
