@@ -34,3 +34,5 @@ Thumbs.db
 emlakpro/
 frontend/static/css/app.css.bak
 frontend/static/js/app.css
+bin/emlakpro
+emlakpro
