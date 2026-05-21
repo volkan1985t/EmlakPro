@@ -2,7 +2,7 @@
    EmlakPro — Service Worker (PWA)
    ============================================================ */
 
-const CACHE_NAME = 'emlakpro-v202605211002';
+const CACHE_NAME = 'emlakpro-v202605211026';
 const STATIC_ASSETS = [
   '/',
   '/static/css/app.css',

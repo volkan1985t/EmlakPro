@@ -1769,3 +1769,14 @@ body {
   background: #fffde7;
   border: 2px dashed var(--gold);
 }
+
+/* İlan form 2 kolon */
+.form-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 0;
+}
+@media (max-width: 560px) {
+  .form-row-2 { grid-template-columns: 1fr; }
+}

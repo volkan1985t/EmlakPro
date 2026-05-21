@@ -772,37 +772,60 @@ function renderIlanFormFields(allFields, ilan, isAdmin, propType) {
   const alwaysShow = ['title','listing_type','property_type','district','neighborhood',
                       'price','price_min','price_max','area_m2','description','notes','address'];
 
-  const html = allFields
+  // Yan yana gosterilecek ciftler
+  const PAIR_FIELDS = [
+    ['listing_type','property_type'],
+    ['district','neighborhood'],
+    ['area_m2','rooms'],
+    ['heating','age'],
+    ['zoning','deed_status'],
+    ['total_floors','aidat'],
+  ];
+
+  const fields_filtered = allFields
     .filter(f => !f.admin_only||isAdmin)
-    .filter(f => f.key!=='price')
-    .map(f => {
-      const isAlways = alwaysShow.includes(f.key);
-      const inProp   = propSpecificKeys ? propSpecificKeys.includes(f.key) : true;
-      const hidden   = propType && !isAlways && !inProp;
-      const val      = ilan?.fields?.[f.key]||'';
-      let input = '';
-      if (f.type==='select') {
-        const opts = cfg.field_sources?.[f.source]||[];
-        input = `<select id="f-${f.key}" ${f.required?'required':''}>
-          <option value="">Seçin...</option>
-          ${opts.map(o=>`<option ${o===val?'selected':''}>${o}</option>`).join('')}
-        </select>`;
-      } else if (f.type==='textarea') {
-        input = `<textarea id="f-${f.key}" rows="3">${val}</textarea>`;
-      } else {
-        const isPrice = f.key==='price_min'||f.key==='price_max';
-        input = `<input id="f-${f.key}" type="text" inputmode="${f.type==='number'?'numeric':''}"
-          value="${isPrice?formatDisplayPrice(val):val}"
-          ${isPrice?`data-raw="${val}"`:''}
-          placeholder="${f.label}"
-          ${f.required?'required':''}
-          ${isPrice?'oninput="formatPriceInput(this)"':''}>`;
+    .filter(f => f.key!=='price');
+
+  function buildFieldInput(f, val) {
+    if (f.type==='select') {
+      const opts = cfg.field_sources?.[f.source]||[];
+      return `<select id="f-${f.key}" ${f.required?'required':''}>
+        <option value="">Seçin...</option>
+        ${opts.map(o=>`<option ${o===val?'selected':''}>${o}</option>`).join('')}
+      </select>`;
+    } else if (f.type==='textarea') {
+      return `<textarea id="f-${f.key}" rows="3">${val}</textarea>`;
+    } else {
+      return `<input id="f-${f.key}" type="text" inputmode="${f.type==='number'?'numeric':''}"
+        value="${val}" placeholder="${f.label}" ${f.required?'required':''}>`;
+    }
+  }
+
+  function buildFieldGroup(f) {
+    const val = ilan?.fields?.[f.key]||'';
+    return `<div class="form-group" id="fg-${f.key}">
+      <label>${f.label}${f.required?' <span class="req">*</span>':''}</label>
+      ${buildFieldInput(f, val)}
+    </div>`;
+  }
+
+  const rendered = new Set();
+  let html = '';
+
+  fields_filtered.forEach(f => {
+    if (rendered.has(f.key)) return;
+    const pair = PAIR_FIELDS.find(p => p[0]===f.key);
+    if (pair) {
+      const f2 = fields_filtered.find(x => x.key===pair[1]);
+      if (f2) {
+        html += `<div class="form-row-2">${buildFieldGroup(f)}${buildFieldGroup(f2)}</div>`;
+        rendered.add(f.key); rendered.add(f2.key);
+        return;
       }
-      return `<div class="form-group" id="fg-${f.key}" ${hidden?'style="display:none"':''}>
-        <label>${f.label}${f.required?' <span class="req">*</span>':''}</label>
-        ${input}
-      </div>`;
-    }).join('');
+    }
+    html += buildFieldGroup(f);
+    rendered.add(f.key);
+  });
 
   const priceVal = ilan?.fields?.price||ilan?.fields?.price_max||'';
   const priceBlock = `
@@ -820,19 +843,34 @@ function renderIlanFormFields(allFields, ilan, isAdmin, propType) {
   document.getElementById('f-property_type')?.addEventListener('change', function() {
     updateIlanFormForPropType(this.value, allFields, isAdmin);
   });
+  // Baslangicta da uygula
+  if (ilan?.fields?.property_type) {
+    updateIlanFormForPropType(ilan.fields.property_type, allFields, isAdmin);
+  }
 }
 
 function updateIlanFormForPropType(propType, allFields, isAdmin) {
-  const cfg = state.cfg;
-  const propSpecificKeys = propType ? (cfg?.listing_fields?.card_fields?.[propType]||[]) : null;
-  const alwaysShow = ['title','listing_type','property_type','district','neighborhood',
-                      'price','price_min','price_max','area_m2','description','notes','address'];
+  // Mulk tipine gore gizlenecek alanlar
+  const HIDE_FOR = {
+    'Arsa':   ['rooms','heating','floor','total_floors','age','aidat','deed_status'],
+    'Villa':  ['floor','total_floors','aidat'],
+    'Ticari': ['rooms','aidat'],
+  };
+  const hideKeys = HIDE_FOR[propType] || [];
   allFields.filter(f=>!f.admin_only||isAdmin).forEach(f => {
-    const isAlways = alwaysShow.includes(f.key);
-    const inProp   = propSpecificKeys ? propSpecificKeys.includes(f.key) : true;
     const fg = document.getElementById('fg-'+f.key);
     if (!fg) return;
-    fg.style.display = (!propType||isAlways||inProp) ? '' : 'none';
+    // Form-row-2 icindeyse parent'i da kontrol et
+    const row2 = fg.closest('.form-row-2');
+    fg.style.display = hideKeys.includes(f.key) ? 'none' : '';
+    // Eger row2 icindeki her iki alan da gizliyse row2'yi de gizle
+    if (row2) {
+      const visibles = [...row2.querySelectorAll('.form-group')].filter(g => g.style.display !== 'none');
+      row2.style.display = visibles.length === 0 ? 'none' : '';
+      // Tek alan gorunuyorsa tek kolon yap
+      if (visibles.length === 1) row2.style.gridTemplateColumns = '1fr';
+      else row2.style.gridTemplateColumns = '';
+    }
   });
 }
 
