@@ -111,6 +111,7 @@ const API = (() => {
   async function toggleListingListed(id)  { return request('PATCH', '/listings/' + id + '/listed'); }
   async function updatePipeline(id, stage) { return request('PATCH', '/listings/' + id + '/pipeline', { stage }); }
   async function getListingHistory(id)    { return request('GET', '/listings/' + id + '/history'); }
+  async function getListingActivities(id) { return request('GET', '/listings/' + id + '/activities'); }
   async function deleteListingImage(listingId, imgId) {
     return request('DELETE', '/listings/' + listingId + '/images/' + imgId);
   }
@@ -160,6 +161,7 @@ const API = (() => {
 
   // -- Dashboard --
   async function getDashboard() { return request('GET', '/dashboard'); }
+  async function getRecentActivities() { return request('GET', '/activities'); }
 
   // -- Gorevler (Tasks) --
   async function getTasks(params = {}) {
@@ -207,12 +209,12 @@ const API = (() => {
     getListings, getListing, getListingByToken,
     updatePipeline,
     createListing, updateListing, toggleListing, toggleListingListed,
-    getListingHistory, deleteListingImage,
+    getListingHistory, getListingActivities, deleteListingImage,
     uploadCover, uploadGallery,
     getRequests, createRequest, updateRequest, toggleRequest, toggleRequestNotify,
     getCustomers, createCustomer, updateCustomer, toggleCustomer, deleteCustomer,
     getCustomerListings, linkListing, unlinkListing,
-    getDashboard,
+    getDashboard, getRecentActivities,
     adminGetUsers, adminCreateUser, adminToggleUser, adminDeleteUser, adminSetChatID,
     adminGetListings, adminDeleteListing,
     adminGetRequests, adminDeleteRequest,

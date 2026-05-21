@@ -426,7 +426,13 @@ async function openDetailModal(id) {
       <table class="detail-table">${priceRow}${statusRow}${listedRow}${rows}</table>
       ${gallery}
       ${il.fields?.description?`<div class="detail-desc"><b>Açıklama:</b><p>${il.fields.description}</p></div>`:''}
+      <div class="detail-tabs">
+        <button class="detail-tab active" onclick="switchDetailTab('aktivite',` + il.id + `,this)">📋 Aktiviteler</button>
+        <button class="detail-tab" onclick="switchDetailTab('kanal',` + il.id + `,this)">📢 Kanallar</button>
+      </div>
+      <div id="detail-tab-content"></div>
     `;
+    loadDetailActivities(il.id);
     // Malik butonu
     const malikBtn = document.getElementById('detail-malik-btn');
     if (malikBtn) {
@@ -501,6 +507,62 @@ function openCrmLinkListing(customerId, e) {
       .map(il=>`<option value="${il.id}">#${il.listing_no} ${il.fields?.title||''}</option>`).join('');
   document.getElementById('link-listing-note').value = '';
   document.getElementById('link-listing-overlay').classList.add('open');
+}
+
+
+async function loadDetailActivities(id) {
+  const cont = document.getElementById('detail-tab-content');
+  if (!cont) return;
+  cont.innerHTML = '<div class="muted" style="padding:8px">Yükleniyor...</div>';
+  try {
+    const acts = await API.getListingActivities(id) || [];
+    if (!acts.length) {
+      cont.innerHTML = '<div class="muted" style="padding:12px;text-align:center;font-size:13px">Aktivite yok.</div>';
+      return;
+    }
+    const ACT_ICON = {
+      created:'✨', updated:'✏️', pipeline:'🔄', channel:'📢',
+      activated:'▶️', deactivated:'⏸', listed:'👁', unlisted:'👁'
+    };
+    cont.innerHTML = '<div class="activity-timeline">' +
+      acts.map(a => {
+        const icon = ACT_ICON[a.type] || '•';
+        const date = new Date(a.created_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+        return '<div class="act-item">' +
+          '<div class="act-icon">' + icon + '</div>' +
+          '<div class="act-body">' +
+            '<div class="act-note">' + escHtml(a.note||'') + '</div>' +
+            '<div class="act-meta">' + escHtml(a.user_name||'') + ' · ' + date + '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('') +
+    '</div>';
+  } catch(e) {
+    cont.innerHTML = '<div class="muted" style="padding:8px">Yüklenemedi.</div>';
+  }
+}
+
+function switchDetailTab(tab, id, btn) {
+  document.querySelectorAll('.detail-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (tab === 'aktivite') {
+    loadDetailActivities(id);
+  } else if (tab === 'kanal') {
+    const cont = document.getElementById('detail-tab-content');
+    if (!cont) return;
+    const il = state.listings.find(l => l.id === id);
+    const channels = state.cfg?.listing_channels || [];
+    const selected = (il?.fields?.channels || '').split(',');
+    cont.innerHTML = '<div class="channels-grid" style="margin-top:8px">' +
+      channels.map(ch => {
+        const isSel = selected.includes(ch.key);
+        return '<div class="channel-card' + (isSel?' selected':'') + '">' +
+          '<span class="channel-card-icon">' + (ch.icon||'🌐') + '</span>' +
+          '<div class="channel-card-name">' + escHtml(ch.label) + '</div>' +
+        '</div>';
+      }).join('') +
+    '</div>';
+  }
 }
 
 function goToMalik(customerId) {
@@ -623,6 +685,56 @@ function buildIlanForm(ilan) {
   const allFields= cfg?.listing_fields?.all_fields||[];
   const propType = ilan?.fields?.property_type||'';
   renderIlanFormFields(allFields, ilan, isAdmin, propType);
+  renderIlanChannels(ilan);
+  renderIlanAutoTasks(ilan);
+}
+
+function renderIlanChannels(ilan) {
+  const grid = document.getElementById('ilan-channels-grid');
+  if (!grid) return;
+  const channels = state.cfg?.listing_channels || [];
+  const selected = ilan?.fields?.channels ? ilan.fields.channels.split(',') : 
+    channels.filter(c=>c.active).map(c=>c.key);
+  grid.innerHTML = channels.map(ch => {
+    const isSel = selected.includes(ch.key);
+    return '<div class="channel-card' + (isSel?' selected':'') + '" data-ch="'+ch.key+'">' +
+      '<span class="channel-card-icon">' + (ch.icon||'🌐') + '</span>' +
+      '<div class="channel-card-name">' + escHtml(ch.label) + '</div>' +
+    '</div>';
+  }).join('');
+  // Event delegation
+  grid.querySelectorAll('.channel-card').forEach(el => {
+    el.addEventListener('click', () => el.classList.toggle('selected'));
+  });
+}
+
+function renderIlanAutoTasks(ilan) {
+  const list = document.getElementById('ilan-autotasks-list');
+  if (!list) return;
+  const tasks = state.cfg?.auto_task_templates || [];
+  list.innerHTML = tasks.map(t => {
+    const checked = t.active ? 'checked' : '';
+    return '<label class="check-item">' +
+      '<input type="checkbox" ' + checked + ' data-task="'+t.key+'" data-label="'+escHtml(t.label)+'">' +
+      escHtml(t.label) +
+    '</label>';
+  }).join('');
+}
+
+function getSelectedChannels() {
+  const selected = [];
+  document.querySelectorAll('#ilan-channels-grid .channel-card.selected').forEach(el => {
+    selected.push(el.dataset.ch);
+  });
+  return selected.join(',');
+}
+
+function getSelectedAutoTasks() {
+  const tasks = [];
+  document.querySelectorAll('#ilan-autotasks-list input[type="checkbox"]:checked').forEach(el => {
+    tasks.push({key: el.dataset.task, label: el.dataset.label});
+  });
+  return tasks;
 }
 
 function renderIlanFormFields(allFields, ilan, isAdmin, propType) {
@@ -709,6 +821,8 @@ document.getElementById('kaydet-btn').addEventListener('click', async ()=>{
   fields.price = getRawPrice("f-price");
   fields.price_max = fields.price;
   fields.price_min = "";
+  fields.channels = getSelectedChannels();
+  fields.pipeline_stage = document.getElementById('f-pipeline_stage')?.value || 'bilgi_alindi';
 
   if (!fields.property_type) { showToast('Mülk tipi zorunludur','error'); btn.disabled=false; btn.textContent=originalText; return; }
   if (!fields.title) { showToast('Başlık zorunludur','error'); btn.disabled=false; btn.textContent=originalText; return; }
@@ -724,10 +838,31 @@ document.getElementById('kaydet-btn').addEventListener('click', async ()=>{
     };
     if (state.editListingId) {
       await API.updateListing(state.editListingId, payload);
-      showToast('✅ İlan güncellendi!');
+      showToast('İlan güncellendi!');
     } else {
-      await API.createListing(payload);
-      showToast('🎉 İlan eklendi!');
+      const newListing = await API.createListing(payload);
+      showToast('İlan eklendi!');
+      // Otomatik gorevler olustur
+      const autoTasks = getSelectedAutoTasks();
+      if (autoTasks.length && newListing?.id) {
+        for (const t of autoTasks) {
+          try {
+            await API.createTask({
+              title: t.label + ' — ' + (fields.title||''),
+              description: '',
+              status: 'bekliyor',
+              priority: 'normal',
+              due_date: null,
+              assignees: [API.getUserID()],
+              parent_id: null,
+            });
+          } catch(_) {}
+        }
+      }
+      // Pipeline guncelle
+      if (newListing?.id && fields.pipeline_stage) {
+        try { await API.updatePipeline(newListing.id, fields.pipeline_stage); } catch(_) {}
+      }
     }
     closeIlanModal();
     await loadListings();
@@ -1320,6 +1455,10 @@ function renderDashboard(d) {
         <canvas id="chart-type" height="220"></canvas>
       </div>
       <div class="dash-chart-box">
+        <div class="dash-chart-title">Son Aktiviteler</div>
+        <div id="dash-activities-inline" style="max-height:440px;overflow-y:auto"></div>
+      </div>
+      <div class="dash-chart-box">
         <div class="dash-chart-title">İlçe Dağılımı (Top 10)</div>
         <canvas id="chart-district" height="220"></canvas>
       </div>
@@ -1327,7 +1466,9 @@ function renderDashboard(d) {
         <div class="dash-chart-title">Danışman Performansı</div>
         <canvas id="chart-agents" height="160"></canvas>
       </div>` : ''}
-    </div>`;
+    </div>
+
+    `;
 
   // Tüm 12 ay etiketleri
   const months = buildLast12Months();
@@ -1382,6 +1523,9 @@ function renderDashboard(d) {
     options:{ responsive:true, indexAxis:'y', plugins:{legend:{display:false}}, scales:{x:{beginAtZero:true,ticks:{stepSize:1}}} }
   });
 
+  // Son aktiviteler
+  loadRecentActivities();
+
   // 5. Danışman bar (admin only)
   if (isAdmin && d.top_agents?.length) {
     _dashCharts.agents = new Chart(document.getElementById('chart-agents'), {
@@ -1393,6 +1537,39 @@ function renderDashboard(d) {
       options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{stepSize:1}}} }
     });
   }
+}
+
+
+async function loadRecentActivities() {
+  const cont = document.getElementById('dash-activities') || document.getElementById('dash-activities-inline');
+  if (!cont) return;
+  try {
+    const acts = await API.getRecentActivities() || [];
+    if (!acts.length) {
+      cont.innerHTML = '<div class="muted" style="padding:12px;text-align:center;font-size:13px">Aktivite yok.</div>';
+      return;
+    }
+    const ACT_ICON = {
+      created:'✨', updated:'✏️', pipeline:'🔄',
+      activated:'▶️', deactivated:'⏸', listed:'👁'
+    };
+    const ACT_COLOR = {
+      created:'#1b5e20', updated:'#1565C0', pipeline:'#e65100',
+      activated:'#1565C0', deactivated:'#c62828', listed:'#6a1b9a', unlisted:'#78909c'
+    };
+    cont.innerHTML = acts.map(a => {
+      const color = ACT_COLOR[a.type] || '#78909c';
+      const date = new Date(a.created_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+      const namePart = a.user_name ? '<b>'+escHtml(a.user_name)+'</b> ' : '';
+      return '<div class="act-item">' +
+        '<div class="act-dot-colored" style="background:'+color+'"></div>' +
+        '<div class="act-body">' +
+          '<div class="act-note" style="font-size:13px">'+namePart+escHtml(a.note||'')+(a.listing_title?(' <span style="font-weight:600;color:var(--navy)">'+escHtml(a.listing_title)+'</span>'):'')+'</div>' +
+          '<div class="act-meta">'+date+'</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  } catch(e) { console.error(e); }
 }
 
 function buildLast12Months() {

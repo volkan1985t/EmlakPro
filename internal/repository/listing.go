@@ -300,3 +300,31 @@ func (r *ListingRepository) ExistsByCustomerID(customerID, excludeListingID int6
 	).Scan(&count)
 	return count > 0, err
 }
+
+func (r *ListingRepository) AddActivity(listingID, userID int64, userName, actType, note string) {
+	r.db.Exec(
+		`INSERT INTO listing_activities (listing_id, user_id, user_name, type, note) VALUES ($1,$2,$3,$4,$5)`,
+		listingID, userID, userName, actType, note,
+	)
+}
+
+func (r *ListingRepository) GetActivities(listingID int64) ([]map[string]interface{}, error) {
+	rows, err := r.db.Query(
+		`SELECT id, type, note, user_name, created_at FROM listing_activities WHERE listing_id=$1 ORDER BY created_at DESC LIMIT 50`,
+		listingID,
+	)
+	if err != nil { return nil, err }
+	defer rows.Close()
+	var result []map[string]interface{}
+	for rows.Next() {
+		var id int64
+		var typ, note, userName string
+		var createdAt interface{}
+		rows.Scan(&id, &typ, &note, &userName, &createdAt)
+		result = append(result, map[string]interface{}{
+			"id": id, "type": typ, "note": note,
+			"user_name": userName, "created_at": createdAt,
+		})
+	}
+	return result, nil
+}

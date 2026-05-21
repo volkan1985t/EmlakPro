@@ -130,6 +130,8 @@ func main() {
 			r.Patch("/listings/{id}/listed",             listingHandler.ToggleListed)
 					r.Patch("/listings/{id}/pipeline",           listingHandler.UpdatePipeline)
 			r.Get("/listings/{id}/history",              listingHandler.GetHistory)
+					r.Get("/listings/{id}/activities",          listingHandler.GetActivities)
+					r.Get("/activities",                        listingHandler.RecentActivities)
 			r.Delete("/listings/{id}/images/{imgID}",    listingHandler.DeleteImage)
 
 			// Upload

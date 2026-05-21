@@ -317,40 +317,65 @@
 
 <!-- İLAN MODAL -->
 <div class="overlay" id="ilan-overlay">
-  <div class="modal">
+  <div class="modal modal-lg">
     <div class="modal-header">
       <h3 id="modal-title">Yeni İlan Ekle</h3>
       <button class="close-btn" id="close-modal">×</button>
     </div>
-    <div id="ilan-form-body"></div>
-    <div class="form-group">
-      <label>Vitrin Resmi <span class="muted">(1920×1080)</span></label>
-      <div class="upload-zone" id="cover-zone">
-        <input type="file" id="cover-input" accept="image/*">
-        <div class="upload-placeholder" id="cover-placeholder">
-          <span class="upload-icon">🖼️</span>
-          <p>Tıkla veya sürükle-bırak</p>
+
+    <!-- Bölüm 1: Temel Bilgiler -->
+    <div class="ilan-section">
+      <div class="ilan-section-title">📋 Temel Bilgiler</div>
+      <div id="ilan-form-body"></div>
+    </div>
+
+    <!-- Bölüm 2: Görseller -->
+    <div class="ilan-section">
+      <div class="ilan-section-title">📸 Görseller</div>
+      <div class="ilan-upload-grid">
+        <div class="form-group">
+          <label>Vitrin Resmi <span class="muted">(800×600)</span></label>
+          <div class="upload-zone" id="cover-zone">
+            <input type="file" id="cover-input" accept="image/*">
+            <div class="upload-placeholder" id="cover-placeholder">
+              <span class="upload-icon">🖼️</span>
+              <p>Tıkla veya sürükle-bırak</p>
+            </div>
+            <div class="cover-preview" id="cover-preview" style="display:none">
+              <img id="cover-img" src="" alt="Vitrin">
+              <button class="remove-cover" id="remove-cover">×</button>
+            </div>
+          </div>
         </div>
-        <div class="cover-preview" id="cover-preview" style="display:none">
-          <img id="cover-img" src="" alt="Vitrin">
-          <button class="remove-cover" id="remove-cover">×</button>
+        <div class="form-group">
+          <label>Galeri Resimleri <span class="muted">(maks. 25)</span></label>
+          <div class="upload-zone upload-zone-sm" id="gallery-zone">
+            <input type="file" id="gallery-input" accept="image/*" multiple>
+            <div class="upload-placeholder">
+              <span class="upload-icon">📷</span>
+              <p>Tıkla veya sürükle-bırak</p>
+            </div>
+          </div>
+          <div class="gallery-preview" id="gallery-preview"></div>
         </div>
       </div>
     </div>
-    <div class="form-group">
-      <label>Galeri Resimleri <span class="muted">(maks. 12)</span></label>
-      <div class="upload-zone upload-zone-sm" id="gallery-zone">
-        <input type="file" id="gallery-input" accept="image/*" multiple>
-        <div class="upload-placeholder">
-          <span class="upload-icon">📷</span>
-          <p>Tıkla veya sürükle-bırak</p>
-        </div>
-      </div>
-      <div class="gallery-preview" id="gallery-preview"></div>
+
+    <!-- Bölüm 3: Yayın Kanalları -->
+    <div class="ilan-section">
+      <div class="ilan-section-title">📢 Yayın Kanalları</div>
+      <div class="channels-grid" id="ilan-channels-grid"></div>
     </div>
+
+    <!-- Bölüm 4: Otomatik Görevler -->
+    <div class="ilan-section">
+      <div class="ilan-section-title">✅ Otomatik Görevler</div>
+      <div class="checklist" id="ilan-autotasks-list"></div>
+    </div>
+
     <div class="modal-footer">
       <button class="btn btn-outline" id="iptal-btn">İptal</button>
-      <button class="btn btn-blue" id="kaydet-btn">💾 Kaydet</button>
+      <button class="btn btn-gold" id="kaydet-btn">💾 Kaydet</button>
     </div>
   </div>
 </div>

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -148,6 +149,11 @@ func (h *ListingHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.listingRepo.AddImage(listing.ID, imgPath, i)
 	}
 	h.listingRepo.AddHistory(listing.ID, userID, "created", "aktif", nil)
+	// Aktivite logu
+	owner, _ := h.userRepo.GetByID(userID)
+	ownerName := ""
+	if owner != nil { ownerName = owner.FullName }
+	h.listingRepo.AddActivity(listing.ID, userID, ownerName, "created", "Portföy sisteme eklendi")
 
 	full, _ := h.listingRepo.GetByID(listing.ID)
 	if full != nil {
@@ -261,6 +267,15 @@ func (h *ListingHandler) UpdatePipeline(w http.ResponseWriter, r *http.Request) 
 		body.Stage, id,
 	)
 	if err != nil { jsonErr(w, "Güncellenemedi", http.StatusInternalServerError); return }
+	// Aktivite
+	owner2, _ := h.userRepo.GetByID(userID)
+	ownerName2 := ""
+	if owner2 != nil { ownerName2 = owner2.FullName }
+	stageLabels := map[string]string{
+		"bilgi_alindi":"Bilgi Alındı","hazirlik":"Hazırlık","ilana_alindi":"İlanda",
+		"muzakere":"Müzakere","sozlesme":"Sözleşme","kapandi":"Kapandı",
+	}
+	h.listingRepo.AddActivity(id, userID, ownerName2, "pipeline", "Aşama değişti: "+stageLabels[body.Stage])
 	jsonOK(w, map[string]string{"message": "Pipeline güncellendi"})
 }
 
@@ -297,6 +312,8 @@ func (h *ListingHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.listingRepo.AddImage(id, imgPath, i+100)
 	}
 	h.listingRepo.AddHistory(id, userID, "updated", existing.Status, nil)
+	h.listingRepo.AddActivity(id, userID, "", "updated", "İlan bilgileri güncellendi")
+	h.listingRepo.AddActivity(id, userID, "", "updated", "İlan bilgileri güncellendi")
 
 	full, _ := h.listingRepo.GetByID(id)
 	if full != nil {
@@ -343,6 +360,7 @@ func (h *ListingHandler) ToggleActive(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "Durum değiştirilemedi", http.StatusInternalServerError); return
 	}
 	h.listingRepo.AddHistory(id, userID, action, status, closingPrice)
+	h.listingRepo.AddActivity(id, userID, "", "deactivated", "İlan durumu güncellendi: "+status)
 	jsonOK(w, map[string]string{"message": "Durum güncellendi", "status": status})
 }
 
@@ -366,7 +384,64 @@ func (h *ListingHandler) ToggleListed(w http.ResponseWriter, r *http.Request) {
 	action := "listed"
 	if existing.IsListed { action = "unlisted" }
 	h.listingRepo.AddHistory(id, userID, action, existing.Status, nil)
-	jsonOK(w, map[string]string{"message": "Listeleme güncellendi"})
+	h.listingRepo.AddActivity(id, userID, "", "listed", "Vitrin durumu degistirildi")
+	jsonOK(w, map[string]string{"message": "Listeleme guncellendi"})
+}
+
+
+
+// GET /api/activities — son aktiviteler (dashboard icin)
+func (h *ListingHandler) RecentActivities(w http.ResponseWriter, r *http.Request) {
+	userID, _ := middleware.GetUserID(r.Context())
+	isAdmin := middleware.GetRole(r.Context()) == "admin"
+
+	var rows *sql.Rows
+	var err error
+	if isAdmin {
+		rows, err = h.listingRepo.DB().Query(
+			`SELECT la.id, la.type, la.note, la.user_name, la.created_at,
+				l.id as listing_id, l.fields->>'title' as listing_title, l.listing_no
+			FROM listing_activities la
+			JOIN listings l ON l.id = la.listing_id
+			ORDER BY la.created_at DESC LIMIT 20`,
+		)
+	} else {
+		rows, err = h.listingRepo.DB().Query(
+			`SELECT la.id, la.type, la.note, la.user_name, la.created_at,
+				l.id as listing_id, l.fields->>'title' as listing_title, l.listing_no
+			FROM listing_activities la
+			JOIN listings l ON l.id = la.listing_id
+			WHERE l.user_id = $1
+			ORDER BY la.created_at DESC LIMIT 20`,
+			userID,
+		)
+	}
+	if err != nil { jsonErr(w, "Aktiviteler yuklenemedi", http.StatusInternalServerError); return }
+	defer rows.Close()
+	var result []map[string]interface{}
+	for rows.Next() {
+		var id, listingID, listingNo int64
+		var typ, note, userName, listingTitle string
+		var createdAt interface{}
+		rows.Scan(&id, &typ, &note, &userName, &createdAt, &listingID, &listingTitle, &listingNo)
+		result = append(result, map[string]interface{}{
+			"id": id, "type": typ, "note": note,
+			"user_name": userName, "created_at": createdAt,
+			"listing_id": listingID, "listing_title": listingTitle, "listing_no": listingNo,
+		})
+	}
+	if result == nil { result = []map[string]interface{}{} }
+	jsonOK(w, result)
+}
+
+// GET /api/listings/{id}/activities
+func (h *ListingHandler) GetActivities(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil { jsonErr(w, "Geçersiz ID", http.StatusBadRequest); return }
+	activities, err := h.listingRepo.GetActivities(id)
+	if err != nil { jsonErr(w, "Aktiviteler yüklenemedi", http.StatusInternalServerError); return }
+	if activities == nil { activities = []map[string]interface{}{} }
+	jsonOK(w, activities)
 }
 
 // GET /api/listings/{id}/history
