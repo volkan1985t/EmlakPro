@@ -109,6 +109,7 @@ const API = (() => {
   async function updateListing(id, data)  { return request('PUT', '/listings/' + id, data); }
   async function toggleListing(id, data)  { return request('PATCH', '/listings/' + id + '/toggle', data || null); }
   async function toggleListingListed(id)  { return request('PATCH', '/listings/' + id + '/listed'); }
+  async function updatePipeline(id, stage) { return request('PATCH', '/listings/' + id + '/pipeline', { stage }); }
   async function getListingHistory(id)    { return request('GET', '/listings/' + id + '/history'); }
   async function deleteListingImage(listingId, imgId) {
     return request('DELETE', '/listings/' + listingId + '/images/' + imgId);
@@ -204,6 +205,7 @@ const API = (() => {
     login, logout, getUser, getUserID, isAdmin, isLoggedIn, validateSession,
     getConfig, getUsers,
     getListings, getListing, getListingByToken,
+    updatePipeline,
     createListing, updateListing, toggleListing, toggleListingListed,
     getListingHistory, deleteListingImage,
     uploadCover, uploadGallery,

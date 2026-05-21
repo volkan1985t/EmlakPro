@@ -53,12 +53,13 @@
       </span>
     </div>
     <nav class="nav">
-      <button class="nav-btn active" data-page="ilanlar">📋 Portföy</button>
-      <button class="nav-btn" data-page="talepler">🎯 Talepler</button>
-      <button class="nav-btn" data-page="musteriler">👥 Müşteriler</button>
-      <button class="nav-btn" data-page="gorevler">✅ Görevler</button>
-      <button class="nav-btn" data-page="dashboard">📊 Dashboard</button>
-      <button class="nav-btn admin-only" data-page="admin" style="display:none">🔧 Admin</button>
+      <button class="nav-btn active" data-page="ilanlar">📋 <span class="nav-btn-text">Portföy</span></button>
+      <button class="nav-btn" data-page="talepler">🎯 <span class="nav-btn-text">Talepler</span></button>
+      <button class="nav-btn" data-page="musteriler">👥 <span class="nav-btn-text">Müşteriler</span></button>
+      <button class="nav-btn" data-page="gorevler">✅ <span class="nav-btn-text">Görevler</span></button>
+      <button class="nav-btn" data-page="dashboard">📊 <span class="nav-btn-text">Dashboard</span></button>
+      <button class="nav-btn" data-page="pipeline">🔄 <span class="nav-btn-text">Süreç İzleme</span></button>
+      <button class="nav-btn admin-only" data-page="admin" style="display:none">🔧 <span class="nav-btn-text">Admin</span></button>
     </nav>
     <div class="hdr-right">
       <button class="btn btn-gold btn-sm" id="yeni-ilan-btn">+ İlan Ekle</button>
@@ -66,6 +67,36 @@
       <button class="btn btn-outline btn-sm" id="logout-btn">Çıkış</button>
     </div>
   </header>
+  <!-- FAB — mobil ilan ekle -->
+  <button class="fab" id="fab-ilan-btn" title="Yeni İlan Ekle">+</button>
+
+  <!-- ALT NAV — sadece mobilde görünür -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <button class="bottom-nav-btn active" data-page="ilanlar">
+      <span class="bottom-nav-icon">📋</span>
+      <span class="bottom-nav-label">Portföy</span>
+    </button>
+    <button class="bottom-nav-btn" data-page="talepler">
+      <span class="bottom-nav-icon">🎯</span>
+      <span class="bottom-nav-label">Talepler</span>
+    </button>
+    <button class="bottom-nav-btn" data-page="musteriler">
+      <span class="bottom-nav-icon">👥</span>
+      <span class="bottom-nav-label">Müşteriler</span>
+    </button>
+    <button class="bottom-nav-btn" data-page="gorevler">
+      <span class="bottom-nav-icon">✅</span>
+      <span class="bottom-nav-label">Görevler</span>
+    </button>
+    <button class="bottom-nav-btn" data-page="pipeline">
+      <span class="bottom-nav-icon">🔄</span>
+      <span class="bottom-nav-label">Süreç</span>
+    </button>
+    <button class="bottom-nav-btn" data-page="dashboard">
+      <span class="bottom-nav-icon">📊</span>
+      <span class="bottom-nav-label">Dashboard</span>
+    </button>
+  </nav>
 
   <div class="main">
 
@@ -114,6 +145,38 @@
     </div>
 
     <!-- GÖREVLER -->
+    <div class="page" id="page-pipeline">
+      <div class="toolbar">
+        <h2 style="font-size:16px;font-weight:700;margin:0">🔄 Süreç İzleme</h2>
+      </div>
+      <div class="pipeline-board" id="pipeline-board">
+        <div class="pipeline-col" data-stage="bilgi_alindi">
+          <div class="pipeline-col-header"><span class="pipeline-dot" style="background:#78909c"></span>Bilgi Alındı <span class="pipeline-cnt" id="pcnt-bilgi_alindi">0</span></div>
+          <div class="pipeline-cards" id="pcards-bilgi_alindi"></div>
+        </div>
+        <div class="pipeline-col" data-stage="hazirlik">
+          <div class="pipeline-col-header"><span class="pipeline-dot" style="background:#42a5f5"></span>Hazırlık <span class="pipeline-cnt" id="pcnt-hazirlik">0</span></div>
+          <div class="pipeline-cards" id="pcards-hazirlik"></div>
+        </div>
+        <div class="pipeline-col" data-stage="ilana_alindi">
+          <div class="pipeline-col-header"><span class="pipeline-dot" style="background:#1565C0"></span>İlanda <span class="pipeline-cnt" id="pcnt-ilana_alindi">0</span></div>
+          <div class="pipeline-cards" id="pcards-ilana_alindi"></div>
+        </div>
+        <div class="pipeline-col" data-stage="muzakere">
+          <div class="pipeline-col-header"><span class="pipeline-dot" style="background:#FFD700"></span>Müzakere <span class="pipeline-cnt" id="pcnt-muzakere">0</span></div>
+          <div class="pipeline-cards" id="pcards-muzakere"></div>
+        </div>
+        <div class="pipeline-col" data-stage="sozlesme">
+          <div class="pipeline-col-header"><span class="pipeline-dot" style="background:#e65100"></span>Sözleşme <span class="pipeline-cnt" id="pcnt-sozlesme">0</span></div>
+          <div class="pipeline-cards" id="pcards-sozlesme"></div>
+        </div>
+        <div class="pipeline-col" data-stage="kapandi">
+          <div class="pipeline-col-header"><span class="pipeline-dot" style="background:#2e7d32"></span>Kapandı <span class="pipeline-cnt" id="pcnt-kapandi">0</span></div>
+          <div class="pipeline-cards" id="pcards-kapandi"></div>
+        </div>
+      </div>
+    </div>
+
     <div class="page" id="page-gorevler">
       <div class="toolbar">
         <select id="task-status-filter">

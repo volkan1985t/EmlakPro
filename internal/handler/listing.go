@@ -227,6 +227,43 @@ func (h *ListingHandler) sendListingNotification(listing *model.Listing) {
 	h.notifySvc.NotifyNewListing(lm, allUsers, requests)
 }
 
+
+// PATCH /api/listings/{id}/pipeline
+func (h *ListingHandler) UpdatePipeline(w http.ResponseWriter, r *http.Request) {
+	userID, _ := middleware.GetUserID(r.Context())
+	isAdmin := middleware.GetRole(r.Context()) == "admin"
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil { jsonErr(w, "Geçersiz ID", http.StatusBadRequest); return }
+
+	var body struct {
+		Stage string `json:"stage"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonErr(w, "Geçersiz istek", http.StatusBadRequest); return
+	}
+
+	valid := map[string]bool{
+		"bilgi_alindi":true, "hazirlik":true, "ilana_alindi":true,
+		"muzakere":true, "sozlesme":true, "kapandi":true,
+	}
+	if !valid[body.Stage] {
+		jsonErr(w, "Geçersiz aşama", http.StatusBadRequest); return
+	}
+
+	// Yetki kontrolu
+	isOwner, _ := h.listingRepo.IsOwner(id, userID)
+	if !isOwner && !isAdmin {
+		jsonErr(w, "Yetkiniz yok", http.StatusForbidden); return
+	}
+
+	_, err = h.listingRepo.DB().Exec(
+		`UPDATE listings SET pipeline_stage=$1, updated_at=NOW() WHERE id=$2`,
+		body.Stage, id,
+	)
+	if err != nil { jsonErr(w, "Güncellenemedi", http.StatusInternalServerError); return }
+	jsonOK(w, map[string]string{"message": "Pipeline güncellendi"})
+}
+
 // PUT /api/listings/{id}
 func (h *ListingHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)

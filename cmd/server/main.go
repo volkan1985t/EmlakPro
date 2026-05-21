@@ -128,6 +128,7 @@ func main() {
 			r.Put("/listings/{id}",                      listingHandler.Update)
 			r.Patch("/listings/{id}/toggle",             listingHandler.ToggleActive)
 			r.Patch("/listings/{id}/listed",             listingHandler.ToggleListed)
+					r.Patch("/listings/{id}/pipeline",           listingHandler.UpdatePipeline)
 			r.Get("/listings/{id}/history",              listingHandler.GetHistory)
 			r.Delete("/listings/{id}/images/{imgID}",    listingHandler.DeleteImage)
 

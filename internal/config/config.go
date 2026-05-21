@@ -23,8 +23,24 @@ type Config struct {
 	HeatingOptions []string `json:"heating_options"`
 	FloorOptions   []string `json:"floor_options"`
 
-	ListingFields ListingFieldsConfig `json:"listing_fields"`
-	RequestFields RequestFieldsConfig `json:"request_fields"`
+	ListingFields    ListingFieldsConfig `json:"listing_fields"`
+	RequestFields    RequestFieldsConfig `json:"request_fields"`
+	ListingChannels  []ChannelConfig     `json:"listing_channels"`
+	AutoTaskTemplates []AutoTaskTemplate `json:"auto_task_templates"`
+}
+
+type ChannelConfig struct {
+	Key    string `json:"key"`
+	Label  string `json:"label"`
+	Icon   string `json:"icon"`
+	Active bool   `json:"active"`
+}
+
+type AutoTaskTemplate struct {
+	Key      string `json:"key"`
+	Label    string `json:"label"`
+	Active   bool   `json:"active"`
+	Priority string `json:"priority"`
 }
 
 type AppConfig struct {

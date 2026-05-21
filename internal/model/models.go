@@ -31,6 +31,7 @@ type Listing struct {
 	IsActive     bool              `json:"is_active" db:"is_active"`
 	IsListed     bool              `json:"is_listed" db:"is_listed"`
 	Status       string            `json:"status" db:"status"`
+	PipelineStage string            `json:"pipeline_stage" db:"pipeline_stage"`
 	ClosingPrice *int64            `json:"closing_price,omitempty" db:"closing_price"`
 	CustomerID   int64             `json:"customer_id,omitempty" db:"customer_id"`
 	CoverImage   string            `json:"cover_image" db:"cover_image"`
@@ -282,4 +283,6 @@ type PublicConfig struct {
 	ListingFields interface{}         `json:"listing_fields"`
 	RequestFields interface{}         `json:"request_fields"`
 	FieldSources  map[string][]string `json:"field_sources"`
+	ListingChannels   interface{}         `json:"listing_channels"`
+	AutoTaskTemplates interface{}         `json:"auto_task_templates"`
 }

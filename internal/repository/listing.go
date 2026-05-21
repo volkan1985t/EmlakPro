@@ -30,7 +30,7 @@ type ListFilter struct {
 
 const listingSelectCols = `
 	l.id, l.listing_no, l.user_id, l.share_token, l.is_active, l.is_listed,
-	l.status, l.closing_price, l.cover_image, l.fields, l.created_at, l.updated_at,
+	l.status, l.pipeline_stage, l.closing_price, l.cover_image, l.fields, l.created_at, l.updated_at,
 	u.full_name as owner_name, COALESCE(l.customer_id, 0) as customer_id`
 
 func scanListing(row interface {
@@ -41,7 +41,7 @@ func scanListing(row interface {
 	var token string
 	err := row.Scan(
 		&l.ID, &l.ListingNo, &l.UserID, &token, &l.IsActive, &l.IsListed,
-		&l.Status, &l.ClosingPrice, &l.CoverImage, &fieldsJSON,
+		&l.Status, &l.PipelineStage, &l.ClosingPrice, &l.CoverImage, &fieldsJSON,
 		&l.CreatedAt, &l.UpdatedAt, &l.OwnerName, &l.CustomerID,
 	)
 	if err != nil { return nil, err }
@@ -51,6 +51,8 @@ func scanListing(row interface {
 	}
 	return &l, nil
 }
+
+func (r *ListingRepository) DB() *sql.DB { return r.db }
 
 func (r *ListingRepository) List(f ListFilter) ([]model.Listing, error) {
 	args  := []interface{}{}

@@ -142,17 +142,26 @@ function showToast(msg, type='info') {
 }
 
 /* ── NAVİGASYON ────────────────────────────────────────────── */
+function navigateTo(page) {
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.bottom-nav-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelector(`.nav-btn[data-page="${page}"]`)?.classList.add('active');
+  document.querySelector(`.bottom-nav-btn[data-page="${page}"]`)?.classList.add('active');
+  document.getElementById('page-'+page)?.classList.add('active');
+  if (page==='admin')      loadAdminPanel();
+  if (page==='musteriler') loadCustomers();
+  if (page==='dashboard')  loadDashboard();
+  if (page==='gorevler')   loadTasks();
+  if (page==='pipeline')   loadPipeline();
+}
+
 document.querySelectorAll('.nav-btn').forEach(btn => {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
-    this.classList.add('active');
-    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-    document.getElementById('page-'+this.dataset.page).classList.add('active');
-    if (this.dataset.page==='admin')      loadAdminPanel();
-    if (this.dataset.page==='musteriler') loadCustomers();
-    if (this.dataset.page==='dashboard')  loadDashboard();
-    if (this.dataset.page==='gorevler')   loadTasks();
-  });
+  btn.addEventListener('click', function() { navigateTo(this.dataset.page); });
+});
+
+document.querySelectorAll('.bottom-nav-btn').forEach(btn => {
+  btn.addEventListener('click', function() { navigateTo(this.dataset.page); });
 });
 document.querySelectorAll('.admin-tab').forEach(btn => {
   btn.addEventListener('click', function() {
@@ -579,6 +588,7 @@ document.getElementById('close-history-modal').addEventListener('click',()=>
 
 /* ─── İlan Form ───────────────────────────────────────────── */
 document.getElementById('yeni-ilan-btn').addEventListener('click',()=>openIlanModal());
+document.getElementById('fab-ilan-btn')?.addEventListener('click',()=>openIlanModal());
 document.getElementById('close-modal').addEventListener('click',closeIlanModal);
 document.getElementById('iptal-btn').addEventListener('click',closeIlanModal);
 document.getElementById('ilan-overlay').addEventListener('click',e=>{
@@ -1916,6 +1926,65 @@ document.getElementById('user-kaydet-btn').addEventListener('click', async()=>{
 });
 
 
+
+/* ═══════════════════════════════════════════════════════
+   PIPELINE
+════════════════════════════════════════════════════════ */
+const PIPELINE_STAGES = [
+  {key:'bilgi_alindi', label:'Bilgi Alındı'},
+  {key:'hazirlik',     label:'Hazırlık'},
+  {key:'ilana_alindi', label:'İlanda'},
+  {key:'muzakere',     label:'Müzakere'},
+  {key:'sozlesme',     label:'Sözleşme'},
+  {key:'kapandi',      label:'Kapandı'},
+];
+
+async function loadPipeline() {
+  try {
+    const listings = await API.getListings();
+    renderPipeline(listings||[]);
+  } catch(e) { showToast('Pipeline yüklenemedi: '+e.message,'error'); }
+}
+
+function renderPipeline(listings) {
+  const groups = {};
+  PIPELINE_STAGES.forEach(s => { groups[s.key] = []; });
+  listings.forEach(il => {
+    const stage = il.pipeline_stage || 'bilgi_alindi';
+    if (groups[stage]) groups[stage].push(il);
+    else groups['bilgi_alindi'].push(il);
+  });
+
+  PIPELINE_STAGES.forEach(s => {
+    const cont = document.getElementById('pcards-'+s.key);
+    const cnt  = document.getElementById('pcnt-'+s.key);
+    if (!cont) return;
+    cnt.textContent = groups[s.key].length;
+    cont.innerHTML = groups[s.key].map(il => {
+      const price = il.fields?.price_max || il.fields?.price || '';
+      return `<div class="pipeline-card" onclick="openDetailModal(${il.id})">
+        <div class="pipeline-card-title">${escHtml(il.fields?.title||'—')}</div>
+        <div class="pipeline-card-meta">${il.fields?.district||''} · ${il.fields?.property_type||''}</div>
+        <div class="pipeline-card-price">${price ? fiyatFormat(price) : '—'}</div>
+        <div class="pipeline-card-no">#${il.listing_no||''} · ${il.owner_name||''}</div>
+        ${(API.isAdmin() || il.user_id===API.getUserID()) ? `
+        <select class="pipeline-stage-select" onchange="doPipelineChange(${il.id},this.value,event)">
+          ${PIPELINE_STAGES.map(st=>`<option value="${st.key}" ${st.key===s.key?'selected':''}>${st.label}</option>`).join('')}
+        </select>` : ''}
+      </div>`;
+    }).join('') || '<div style="font-size:12px;color:var(--muted);text-align:center;padding:12px">Boş</div>';
+  });
+}
+
+async function doPipelineChange(id, stage, e) {
+  e.stopPropagation();
+  try {
+    await API.updatePipeline(id, stage);
+    await loadPipeline();
+    showToast('Aşama güncellendi.');
+  } catch(err) { showToast(err.message,'error'); }
+}
+
 /* ═══════════════════════════════════════════════════════
    ADMIN SETTINGS
 ════════════════════════════════════════════════════════ */
@@ -1924,6 +1993,8 @@ async function loadAdminSettings() {
   if (!cont) return;
   try {
     const s = await API.getAdminSettings();
+    s.listing_channels    = s.listing_channels    || state.cfg?.listing_channels    || [];
+    s.auto_task_templates = s.auto_task_templates || state.cfg?.auto_task_templates || [];
     renderAdminSettings(s);
   } catch(e) { cont.innerHTML = `<div class="alert alert-error">Ayarlar yüklenemedi: ${e.message}</div>`; }
 }
@@ -1991,7 +2062,11 @@ function renderAdminSettings(s) {
       <div id="custom-fields-${pt}"></div>
     </div>`).join('');
 
-  cont.innerHTML = `
+  // Kanallar ve gorevler HTML'i fonksiyonlarla uret
+  const channelsHTML = buildChannelsHTML(s.listing_channels||[]);
+  const autoTasksHTML = buildAutoTasksHTML(s.auto_task_templates||[]);
+
+    cont.innerHTML = `
     <div class="settings-grid">
       <div class="settings-col">
         <h3 class="settings-section-title">Listeler</h3>
@@ -2005,7 +2080,10 @@ function renderAdminSettings(s) {
         ${listEditor('zoning_options', 'İmar Seçenekleri', s.zoning_options)}
       </div>
       <div class="settings-col">
-        <h3 class="settings-section-title">Talep Formu Alanları</h3>
+        <h3 class="settings-section-title">Yayın Kanalları & Görevler</h3>
+        ${channelsHTML}
+        ${autoTasksHTML}
+        <h3 class="settings-section-title" style="margin-top:16px">Talep Formu Alanları</h3>
         <div class="setting-group">${requestToggles}</div>
         <h3 class="settings-section-title" style="margin-top:16px">Mülke Göre Ek Alanlar</h3>
         ${byPropToggles}
@@ -2016,6 +2094,22 @@ function renderAdminSettings(s) {
     </div>`;
 
   state._adminSettings = s;
+
+  // Toggle butonlari icin delegation
+  setTimeout(() => {
+    document.getElementById('setting-channels')?.addEventListener('click', e => {
+      const btn = e.target.closest('.talep-toggle-btn');
+      const del = e.target.closest('[data-ch]');
+      if (btn) { btn.classList.toggle('on'); btn.querySelector('.talep-toggle-text').textContent = btn.classList.contains('on') ? 'Acik' : 'Kapali'; }
+      if (del) removeChannelItem(del.dataset.ch);
+    });
+    document.getElementById('setting-autotasks')?.addEventListener('click', e => {
+      const btn = e.target.closest('.talep-toggle-btn');
+      const del = e.target.closest('[data-at]');
+      if (btn) { btn.classList.toggle('on'); btn.querySelector('.talep-toggle-text').textContent = btn.classList.contains('on') ? 'Acik' : 'Kapali'; }
+      if (del) removeAutoTaskItem(del.dataset.at);
+    });
+  }, 100);
 }
 
 function addSettingItem(containerId) {
@@ -2068,6 +2162,125 @@ function addCustomField(propType) {
   }
 }
 
+
+
+function buildChannelsHTML(channels) {
+  let rows = channels.map(ch => {
+    const onClass = ch.active ? ' on' : '';
+    const onText  = ch.active ? 'Acik' : 'Kapali';
+    const div = document.createElement('div');
+    div.className = 'setting-toggle-row';
+    div.id = 'ch-row-' + ch.key;
+    div.innerHTML =
+      '<span>' + escHtml(ch.icon||'') + ' ' + escHtml(ch.label) + '</span>' +
+      '<div style="display:flex;gap:8px;align-items:center">' +
+        '<button class="talep-toggle-btn' + onClass + '" id="ch-toggle-' + ch.key + '">' +
+          '<span class="talep-toggle-knob"></span>' +
+          '<span class="talep-toggle-text">' + onText + '</span>' +
+        '</button>' +
+        '<button class="btn btn-sm btn-danger" data-ch="' + ch.key + '">x</button>' +
+      '</div>';
+    return div.outerHTML;
+  }).join('');
+  return '<div class="setting-group">' +
+    '<div class="setting-group-header">' +
+      '<span class="setting-group-title">Yayin Kanallari</span>' +
+      '<button class="btn btn-sm btn-outline" onclick="addChannelItem()">+ Ekle</button>' +
+    '</div>' +
+    '<div id="setting-channels">' + rows + '</div>' +
+  '</div>';
+}
+
+function buildAutoTasksHTML(tasks) {
+  let rows = tasks.map(t => {
+    const onClass = t.active ? ' on' : '';
+    const onText  = t.active ? 'Acik' : 'Kapali';
+    const div = document.createElement('div');
+    div.className = 'setting-toggle-row';
+    div.id = 'at-row-' + t.key;
+    div.innerHTML =
+      '<span>' + escHtml(t.label) + '</span>' +
+      '<div style="display:flex;gap:8px;align-items:center">' +
+        '<button class="talep-toggle-btn' + onClass + '" id="at-toggle-' + t.key + '">' +
+          '<span class="talep-toggle-knob"></span>' +
+          '<span class="talep-toggle-text">' + onText + '</span>' +
+        '</button>' +
+        '<button class="btn btn-sm btn-danger" data-at="' + t.key + '">x</button>' +
+      '</div>';
+    return div.outerHTML;
+  }).join('');
+  return '<div class="setting-group">' +
+    '<div class="setting-group-header">' +
+      '<span class="setting-group-title">Otomatik Gorevler</span>' +
+      '<button class="btn btn-sm btn-outline" onclick="addAutoTaskItem()">+ Ekle</button>' +
+    '</div>' +
+    '<div id="setting-autotasks">' + rows + '</div>' +
+  '</div>';
+}
+
+function addChannelItem() {
+  const label = prompt('Kanal adı (örn: Zillow):')?.trim();
+  if (!label) return;
+  const key = label.toLowerCase().replace(/\s+/g,'_');
+  const icon = prompt('İkon (emoji, örn: 🌐):')?.trim() || '🌐';
+  const cont = document.getElementById('setting-channels');
+  if (!cont) return;
+  const row = document.createElement('div');
+  row.className = 'setting-toggle-row';
+  row.id = 'ch-row-'+key;
+  row.innerHTML = `
+    <span>${icon} ${escHtml(label)}</span>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="talep-toggle-btn on" id="ch-toggle-${key}"
+        onclick="this.classList.toggle('on');this.querySelector('.talep-toggle-text').textContent=this.classList.contains('on')?'Açık':'Kapalı'">
+        <span class="talep-toggle-knob"></span>
+        <span class="talep-toggle-text">Açık</span>
+      </button>
+      <button class="btn btn-sm btn-danger" onclick="removeChannelItem('${key}')">×</button>
+    </div>`;
+  cont.appendChild(row);
+  if (!state._adminSettings) state._adminSettings = {};
+  if (!state._adminSettings.listing_channels) state._adminSettings.listing_channels = [];
+  state._adminSettings.listing_channels.push({key, label, icon, active: true});
+  if (state.cfg) {
+    if (!state.cfg.listing_channels) state.cfg.listing_channels = [];
+    state.cfg.listing_channels.push({key, label, icon, active: true});
+  }
+}
+
+function removeChannelItem(key) {
+  document.getElementById('ch-row-'+key)?.remove();
+}
+
+function addAutoTaskItem() {
+  const label = prompt('Görev açıklaması (örn: Fotoğraf çekimi):')?.trim();
+  if (!label) return;
+  const key = label.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
+  const cont = document.getElementById('setting-autotasks');
+  if (!cont) return;
+  const row = document.createElement('div');
+  row.className = 'setting-toggle-row';
+  row.id = 'at-row-'+key;
+  row.innerHTML = `
+    <span>${escHtml(label)}</span>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="talep-toggle-btn on" id="at-toggle-${key}"
+        onclick="this.classList.toggle('on');this.querySelector('.talep-toggle-text').textContent=this.classList.contains('on')?'Açık':'Kapalı'">
+        <span class="talep-toggle-knob"></span>
+        <span class="talep-toggle-text">Açık</span>
+      </button>
+      <button class="btn btn-sm btn-danger" onclick="removeAutoTaskItem('${key}')">×</button>
+    </div>`;
+  cont.appendChild(row);
+  if (!state._adminSettings) state._adminSettings = {};
+  if (!state._adminSettings.auto_task_templates) state._adminSettings.auto_task_templates = [];
+  state._adminSettings.auto_task_templates.push({key, label, active: true, priority: 'normal'});
+}
+
+function removeAutoTaskItem(key) {
+  document.getElementById('at-row-'+key)?.remove();
+}
+
 async function saveAdminSettings() {
   const payload = {
     property_types:  getSettingList('property_types'),
@@ -2108,6 +2321,28 @@ async function saveAdminSettings() {
   });
   payload.request_by_property = byPropNew;
   payload.all_fields = state.cfg?.listing_fields?.all_fields || [];
+
+  // Kanallar
+  const channels = [];
+  document.querySelectorAll('#setting-channels .setting-toggle-row').forEach(row => {
+    const key = row.id.replace('ch-row-','');
+    const label = row.querySelector('span')?.textContent?.trim() || key;
+    const active = document.getElementById('ch-toggle-'+key)?.classList.contains('on') || false;
+    const icon = label.match(/^(\S+)/)?.[1] || '🌐';
+    const cleanLabel = label.replace(icon,'').trim();
+    channels.push({key, label: cleanLabel, icon, active});
+  });
+  payload.listing_channels = channels;
+
+  // Otomatik gorevler
+  const autoTasks = [];
+  document.querySelectorAll('#setting-autotasks .setting-toggle-row').forEach(row => {
+    const key = row.id.replace('at-row-','');
+    const label = row.querySelector('span')?.textContent?.trim() || key;
+    const active = document.getElementById('at-toggle-'+key)?.classList.contains('on') || false;
+    autoTasks.push({key, label, active, priority: 'normal'});
+  });
+  payload.auto_task_templates = autoTasks;
 
   try {
     await API.updateAdminSettings(payload);
