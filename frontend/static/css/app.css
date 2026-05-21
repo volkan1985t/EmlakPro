@@ -1755,3 +1755,17 @@ body {
   z-index: 10;
   position: relative;
 }
+
+/* Pipeline drag over */
+.pipeline-cards.drag-over-active {
+  background: #fffde7;
+  border: 2px dashed var(--gold);
+  border-radius: var(--rsm);
+  min-height: 60px;
+}
+.pipeline-card.dragging { opacity: .4; }
+
+.pipeline-col.pipeline-drag-over {
+  background: #fffde7;
+  border: 2px dashed var(--gold);
+}

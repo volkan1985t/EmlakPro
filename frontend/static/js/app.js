@@ -600,6 +600,35 @@ document.getElementById('detail-share-btn').addEventListener('click', async ()=>
   await navigator.clipboard.writeText(`${location.origin}/api/listings/share/${il.share_token}`).catch(()=>{});
   showToast('📋 Link kopyalandı!');
 });
+
+document.getElementById('detail-listed-btn')?.addEventListener('click', async ()=>{
+  if (!state.editDetailId) return;
+  try {
+    await API.toggleListingListed(state.editDetailId);
+    await loadListings();
+    const il = state.listings.find(l=>l.id===state.editDetailId);
+    const btn = document.getElementById('detail-listed-btn');
+    if (btn) btn.textContent = il?.is_listed ? '👁 Gizle' : '👁 Göster';
+    showToast(il?.is_listed ? 'İlan gösteriliyor.' : 'İlan gizlendi.');
+  } catch(e) { showToast(e.message,'error'); }
+});
+
+document.getElementById('detail-toggle-btn')?.addEventListener('click', async ()=>{
+  if (!state.editDetailId) return;
+  const il = state.listings.find(l=>l.id===state.editDetailId);
+  if (!il) return;
+  document.getElementById('detail-overlay').classList.remove('open');
+  if (il.is_active) {
+    openPassiveModal(state.editDetailId, il.fields?.title||'');
+  } else {
+    try {
+      await API.toggleListing(state.editDetailId, {});
+      await loadListings();
+      showToast('İlan aktif edildi.');
+    } catch(e) { showToast(e.message,'error'); }
+  }
+});
+
 document.getElementById('detail-edit-btn').addEventListener('click',()=>{
   document.getElementById('detail-overlay').classList.remove('open');
   openEditListing(state.editDetailId);
@@ -2139,17 +2168,45 @@ function renderPipeline(listings) {
     cnt.textContent = groups[s.key].length;
     cont.innerHTML = groups[s.key].map(il => {
       const price = il.fields?.price_max || il.fields?.price || '';
-      return `<div class="pipeline-card" onclick="openDetailModal(${il.id})">
+      const canEdit = API.isAdmin() || il.user_id===API.getUserID();
+      return `<div class="pipeline-card" data-id="${il.id}" data-stage="${s.key}" draggable="${canEdit}" onclick="openDetailModal(${il.id})">
         <div class="pipeline-card-title">${escHtml(il.fields?.title||'—')}</div>
         <div class="pipeline-card-meta">${il.fields?.district||''} · ${il.fields?.property_type||''}</div>
         <div class="pipeline-card-price">${price ? fiyatFormat(price) : '—'}</div>
         <div class="pipeline-card-no">#${il.listing_no||''} · ${il.owner_name||''}</div>
-        ${(API.isAdmin() || il.user_id===API.getUserID()) ? `
+        ${canEdit ? `
         <select class="pipeline-stage-select" onchange="doPipelineChange(${il.id},this.value,event)">
           ${PIPELINE_STAGES.map(st=>`<option value="${st.key}" ${st.key===s.key?'selected':''}>${st.label}</option>`).join('')}
         </select>` : ''}
       </div>`;
     }).join('') || '<div style="font-size:12px;color:var(--muted);text-align:center;padding:12px">Boş</div>';
+
+    // Drag & drop
+    cont.querySelectorAll('.pipeline-card[draggable="true"]').forEach(card => {
+      card.addEventListener('dragstart', e => {
+        e.dataTransfer.setData('text/plain', card.dataset.id+'|'+card.dataset.stage);
+        card.classList.add('dragging');
+        e.stopPropagation();
+      });
+      card.addEventListener('dragend', e => card.classList.remove('dragging'));
+    });
+
+    // Drop zone
+    const col = cont.closest('.pipeline-col');
+    col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('pipeline-drag-over'); });
+    col.addEventListener('dragleave', e => { if (!col.contains(e.relatedTarget)) col.classList.remove('pipeline-drag-over'); });
+    col.addEventListener('drop', async e => {
+      e.preventDefault();
+      col.classList.remove('pipeline-drag-over');
+      const [dragId, oldStage] = (e.dataTransfer.getData('text/plain')||'').split('|');
+      const newStage = col.dataset.stage;
+      if (!dragId || !newStage || oldStage === newStage) return;
+      try {
+        await API.updatePipeline(parseInt(dragId), newStage);
+        await loadPipeline();
+        showToast('Aşama güncellendi.');
+      } catch(err) { showToast(err.message,'error'); }
+    });
   });
 }
 
