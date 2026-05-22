@@ -412,14 +412,18 @@ async function openDetailModal(id) {
     const listedRow = `<tr><td class="detail-label">Vitrin</td><td>
       <span class="tag ${il.is_listed?'tag-green':'tag-amber'}">${il.is_listed?'Listelendi':'Gizli'}</span>
     </td></tr>`;
-
+    const _allImgs = [];
+    if (il.cover_image) _allImgs.push(il.cover_image);
+    (il.images||[]).forEach(img => _allImgs.push(img.path));
+    state.lightboxImages = _allImgs;
     const priceRow = `<tr><td class="detail-label">Fiyat</td><td><b>${priceVal}</b></td></tr>`;
-    const noHTML   = il.listing_no ? `<div class="detail-no">İlan No: <b>#${il.listing_no}</b></div>` : '';
-    const coverHTML= il.cover_image ? `<div class="detail-cover"><img src="${il.cover_image}" alt="" loading="lazy"></div>` : '';
+    const noHTML = il.listing_no ? `<div class="detail-no">İlan No: <b>#${il.listing_no}</b></div>` : '';
+    const coverHTML= il.cover_image ? `<div class="detail-cover"><img src="${il.cover_image}" alt="" loading="lazy" style="cursor:zoom-in" onclick="openLightboxIdx(0)"></div>` : '';
     const gallery  = il.images?.length
-      ? `<div class="detail-gallery">${il.images.map(img=>
-          `<img src="${img.path}" alt="" loading="lazy" onclick="openLightbox('${img.path}')">`
-        ).join('')}</div>` : '';
+      ? `<div class="detail-gallery">${il.images.map((img,i)=>{
+          const idx = il.cover_image ? i+1 : i;
+          return `<img src="${img.path}" alt="" loading="lazy" style="cursor:zoom-in" onclick="openLightboxIdx(${idx})">`;
+        }).join('')}</div>` : '';
 
     document.getElementById('detail-content').innerHTML = `
       ${coverHTML}${noHTML}
@@ -581,12 +585,51 @@ function goToMalik(customerId) {
     }, 300);
   });
 }
-function openLightbox(src) {
-  document.getElementById('lightbox-img').src = src;
+function openLightboxIdx(idx) {
+  if (!state.lightboxImages?.length) return;
+  state.lbImages = state.lightboxImages;
+  state.lbIdx = idx;
+  document.getElementById('lightbox-img').src = state.lbImages[state.lbIdx];
   document.getElementById('lightbox').classList.add('open');
 }
-document.getElementById('lightbox')?.addEventListener('click',()=>
-  document.getElementById('lightbox').classList.remove('open'));
+
+function openLightbox(src, images) {
+  state.lbImages = images && images.length ? images : [src];
+  state.lbIdx = state.lbImages.indexOf(src);
+  if (state.lbIdx < 0) state.lbIdx = 0;
+  document.getElementById('lightbox-img').src = state.lbImages[state.lbIdx];
+  document.getElementById('lightbox').classList.add('open');
+}
+
+function lbGo(dir) {
+  if (!state.lbImages?.length) return;
+  state.lbIdx = (state.lbIdx + dir + state.lbImages.length) % state.lbImages.length;
+  document.getElementById('lightbox-img').src = state.lbImages[state.lbIdx];
+}
+
+function lbClose() {
+  document.getElementById('lightbox').classList.remove('open');
+}
+
+// Lightbox event'leri
+// Lightbox — tek delegation
+document.body.addEventListener('click', e => {
+  const lb = document.getElementById('lightbox');
+  if (!lb?.classList.contains('open')) return;
+  if (e.target.id === 'lb-prev')       { e.stopPropagation(); lbGo(-1); return; }
+  if (e.target.id === 'lb-next')       { e.stopPropagation(); lbGo(+1); return; }
+  if (e.target.id === 'lb-close')      { e.stopPropagation(); lbClose(); return; }
+  if (e.target.id === 'lightbox-img')  { e.stopPropagation(); lbGo(+1); return; }
+  if (e.target.id === 'lightbox')      { lbClose(); return; }
+});
+
+document.addEventListener('keydown', e => {
+  const lb = document.getElementById('lightbox');
+  if (!lb?.classList.contains('open')) return;
+  if (e.key === 'ArrowRight') lbGo(+1);
+  if (e.key === 'ArrowLeft')  lbGo(-1);
+  if (e.key === 'Escape')     lbClose();
+});
 document.getElementById('close-detail').addEventListener('click',()=>
   document.getElementById('detail-overlay').classList.remove('open'));
 document.getElementById('detail-overlay').addEventListener('click',e=>{
@@ -852,9 +895,10 @@ function renderIlanFormFields(allFields, ilan, isAdmin, propType) {
 function updateIlanFormForPropType(propType, allFields, isAdmin) {
   // Mulk tipine gore gizlenecek alanlar
   const HIDE_FOR = {
-    'Arsa':   ['rooms','heating','floor','total_floors','age','aidat','deed_status'],
-    'Villa':  ['floor','total_floors','aidat'],
-    'Ticari': ['rooms','aidat'],
+    'Arsa':   ['rooms','heating','age','aidat'],
+    'Daire':  ['zoning'],
+    'Villa':  ['zoning','total_floors','aidat'],
+    'Ticari': ['rooms','aidat','zoning'],
   };
   const hideKeys = HIDE_FOR[propType] || [];
   allFields.filter(f=>!f.admin_only||isAdmin).forEach(f => {
