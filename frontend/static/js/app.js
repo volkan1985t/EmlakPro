@@ -173,6 +173,7 @@ document.querySelectorAll('.admin-tab').forEach(btn => {
     if (this.dataset.tab==='admin-listings') loadAdminListings();
     if (this.dataset.tab==='admin-requests') loadAdminRequests();
     if (this.dataset.tab==='admin-settings') loadAdminSettings();
+    if (this.dataset.tab==='admin-fields')   loadAdminFields();
   });
 });
 
@@ -825,9 +826,11 @@ function renderIlanFormFields(allFields, ilan, isAdmin, propType) {
     ['total_floors','aidat'],
   ];
 
+  const listingType = ilan?.fields?.listing_type || '';
   const fields_filtered = allFields
     .filter(f => !f.admin_only||isAdmin)
-    .filter(f => f.key!=='price');
+    .filter(f => f.key!=='price')
+    .filter(f => fieldVisible(f, 'form', listingType, propType||''));
 
   function buildFieldInput(f, val) {
     if (f.type==='select') {
@@ -886,34 +889,27 @@ function renderIlanFormFields(allFields, ilan, isAdmin, propType) {
   document.getElementById('f-property_type')?.addEventListener('change', function() {
     updateIlanFormForPropType(this.value, allFields, isAdmin);
   });
+  document.getElementById('f-listing_type')?.addEventListener('change', function() {
+    const pt = document.getElementById('f-property_type')?.value || '';
+    updateIlanFormForPropType(pt, allFields, isAdmin);
+  });
   // Baslangicta da uygula
-  if (ilan?.fields?.property_type) {
-    updateIlanFormForPropType(ilan.fields.property_type, allFields, isAdmin);
-  }
+  const initPt = ilan?.fields?.property_type || '';
+  if (initPt) updateIlanFormForPropType(initPt, allFields, isAdmin);
 }
 
 function updateIlanFormForPropType(propType, allFields, isAdmin) {
-  // Mulk tipine gore gizlenecek alanlar
-  const HIDE_FOR = {
-    'Arsa':   ['rooms','heating','age','aidat'],
-    'Daire':  ['zoning'],
-    'Villa':  ['zoning','total_floors','aidat'],
-    'Ticari': ['rooms','aidat','zoning'],
-  };
-  const hideKeys = HIDE_FOR[propType] || [];
+  const listingType = document.getElementById('f-listing_type')?.value || '';
   allFields.filter(f=>!f.admin_only||isAdmin).forEach(f => {
     const fg = document.getElementById('fg-'+f.key);
     if (!fg) return;
-    // Form-row-2 icindeyse parent'i da kontrol et
+    const visible = fieldVisible(f, 'form', listingType, propType);
+    fg.style.display = visible ? '' : 'none';
     const row2 = fg.closest('.form-row-2');
-    fg.style.display = hideKeys.includes(f.key) ? 'none' : '';
-    // Eger row2 icindeki her iki alan da gizliyse row2'yi de gizle
     if (row2) {
-      const visibles = [...row2.querySelectorAll('.form-group')].filter(g => g.style.display !== 'none');
-      row2.style.display = visibles.length === 0 ? 'none' : '';
-      // Tek alan gorunuyorsa tek kolon yap
-      if (visibles.length === 1) row2.style.gridTemplateColumns = '1fr';
-      else row2.style.gridTemplateColumns = '';
+      const visibles = [...row2.querySelectorAll('.form-group')].filter(g=>g.style.display!=='none');
+      row2.style.display = visibles.length===0 ? 'none' : '';
+      row2.style.gridTemplateColumns = visibles.length===1 ? '1fr' : '';
     }
   });
 }
@@ -2215,6 +2211,35 @@ document.getElementById('user-kaydet-btn').addEventListener('click', async()=>{
 
 
 
+
+/* ═══════════════════════════════════════════════════════
+   SHOW_ON HELPER
+════════════════════════════════════════════════════════ */
+function fieldVisible(field, context, listingType, propType) {
+  const showOn = field.show_on;
+  if (!showOn) return true;
+  const list = showOn[context] || [];
+  if (!list.length) return false;
+  if (list.includes('*')) return true;
+
+  const lt = listingType || '';
+  const pt = propType || '';
+
+  // Eger lt veya pt secilmemisse ve alan bu context'te herhangi bir combo'da varsa goster
+  if (!lt && !pt) return list.length > 0;
+  if (!lt) return list.some(r => r === '*' || r.endsWith('/'+pt) || r === '*/'+pt);
+  if (!pt) return list.some(r => r === '*' || r.startsWith(lt+'/') || r === lt+'/*');
+
+  const combo = lt + '/' + pt;
+  for (const rule of list) {
+    if (rule === '*') return true;
+    if (rule === combo) return true;
+    if (rule === lt + '/*') return true;
+    if (rule === '*/' + pt) return true;
+  }
+  return false;
+}
+
 /* ═══════════════════════════════════════════════════════
    PIPELINE
 ════════════════════════════════════════════════════════ */
@@ -2301,6 +2326,245 @@ async function doPipelineChange(id, stage, e) {
   } catch(err) { showToast(err.message,'error'); }
 }
 
+
+/* ═══════════════════════════════════════════════════════
+   ALAN YÖNETİMİ
+════════════════════════════════════════════════════════ */
+async function loadAdminFields() {
+  const cont = document.getElementById('admin-fields-content');
+  if (!cont) return;
+  try {
+    const s = await API.getAdminSettings();
+    renderAdminFields(s.all_fields || state.cfg?.listing_fields?.all_fields || []);
+  } catch(e) {
+    cont.innerHTML = '<div class="alert alert-error">Yüklenemedi: ' + e.message + '</div>';
+  }
+}
+
+function renderAdminFields(allFields) {
+  const cont = document.getElementById('admin-fields-content');
+  if (!cont) return;
+
+  const cfg = state.cfg;
+  const listingTypes = cfg?.listing_types || ['Satılık','Kiralık'];
+  const propTypes = cfg?.property_types || ['Daire','Villa','Arsa','Ticari'];
+  const combos = [];
+  listingTypes.forEach(lt => propTypes.forEach(pt => combos.push({lt, pt, key: lt+'/'+pt})));
+  const contexts = ['form','card','detail','telegram'];
+  const ctxLabels = {form:'Form', card:'Kart', detail:'Detay', telegram:'Telegram'};
+
+  let html = '<div class="fields-toolbar">' +
+    '<button class="btn btn-gold" onclick="saveAdminFields()">💾 Kaydet</button>' +
+    '<button class="btn btn-outline" onclick="addNewField()">+ Yeni Alan</button>' +
+  '</div>';
+
+  html += '<div class="fields-table-wrap"><table class="fields-table">';
+  html += '<thead><tr><th>Alan</th><th>Tip</th>';
+  contexts.forEach(ctx => {
+    html += '<th colspan="' + combos.length + '">' + ctxLabels[ctx] + '</th>';
+  });
+  html += '<th></th></tr>';
+
+  // Alt başlık satırı
+  html += '<tr><th></th><th></th>';
+  contexts.forEach(() => {
+    combos.forEach(c => {
+      html += '<th class="combo-header"><span class="combo-lt">' + c.lt[0] + '</span><span class="combo-pt">' + c.pt.slice(0,3) + '</span></th>';
+    });
+  });
+  html += '<th></th></tr></thead><tbody>';
+
+  allFields.forEach((f, idx) => {
+    html += '<tr data-key="' + f.key + '">';
+    html += '<td><span class="field-label">' + escHtml(f.label) + '</span><small class="muted"> (' + f.key + ')</small></td>';
+    html += '<td><span class="field-type">' + f.type + '</span></td>';
+
+    contexts.forEach(ctx => {
+      const showList = f.show_on?.[ctx] || [];
+      combos.forEach(c => {
+        const checked = showList.includes('*') ||
+          showList.includes(c.key) ||
+          showList.includes(c.lt + '/*') ||
+          showList.includes('*/' + c.pt);
+        html += '<td class="combo-cell">' +
+          '<input type="checkbox" class="field-cb" ' +
+          'data-field="' + f.key + '" data-ctx="' + ctx + '" data-combo="' + c.key + '"' +
+          (checked ? ' checked' : '') + '>' +
+          '</td>';
+      });
+    });
+
+    html += '<td><button class="btn btn-sm btn-danger" onclick="removeField(\'' + f.key + '\')" title="Sil">🗑</button></td>';
+    html += '</tr>';
+  });
+
+  html += '</tbody></table></div>';
+  cont.innerHTML = html;
+}
+
+async function saveAdminFields() {
+  const cfg = state.cfg;
+  const listingTypes = cfg?.listing_types || ['Satılık','Kiralık'];
+  const propTypes = cfg?.property_types || ['Daire','Villa','Arsa','Ticari'];
+  const combos = [];
+  listingTypes.forEach(lt => propTypes.forEach(pt => combos.push(lt+'/'+pt)));
+  const contexts = ['form','card','detail','telegram'];
+
+  // Her alan için show_on topla
+  const allFields = state.cfg?.listing_fields?.all_fields || [];
+  const fieldMap = {};
+  allFields.forEach(f => {
+    fieldMap[f.key] = {
+      ...f,
+      show_on: { form:[], card:[], detail:[], telegram:[] }
+    };
+  });
+
+  document.querySelectorAll('.field-cb').forEach(cb => {
+    if (!cb.checked) return;
+    const key = cb.dataset.field;
+    const ctx = cb.dataset.ctx;
+    const combo = cb.dataset.combo;
+    if (fieldMap[key]) {
+      if (!fieldMap[key].show_on[ctx].includes(combo)) {
+        fieldMap[key].show_on[ctx].push(combo);
+      }
+    }
+  });
+
+  const updatedFields = Object.values(fieldMap);
+
+  // state.cfg guncelle
+  if (state.cfg?.listing_fields) {
+    state.cfg.listing_fields.all_fields = updatedFields;
+  }
+
+  // Custom listleri de kaydet
+  const customListsPayload = state.cfg?.custom_lists || {};
+
+  try {
+    await API.updateAdminSettings({ 
+      all_fields: updatedFields,
+      custom_lists: customListsPayload
+    });
+    showToast('Alan ayarları kaydedildi!');
+    await loadConfig();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+function removeField(key) {
+  if (!confirm(key + ' alanını silmek istiyor musunuz?')) return;
+  if (state.cfg?.listing_fields?.all_fields) {
+    state.cfg.listing_fields.all_fields = state.cfg.listing_fields.all_fields.filter(f => f.key !== key);
+  }
+  loadAdminFields();
+}
+
+function addNewField() {
+  // Modal ac
+  document.getElementById('nf-key').value = '';
+  document.getElementById('nf-label').value = '';
+  document.getElementById('nf-type').value = 'text';
+  document.getElementById('nf-options-block').style.display = 'none';
+  document.getElementById('nf-options-list').innerHTML = '';
+  document.getElementById('nf-option-input').value = '';
+  document.getElementById('new-field-overlay').classList.add('open');
+  return;
+}
+
+function onNewFieldTypeChange(type) {
+  document.getElementById('nf-options-block').style.display = type === 'select' ? '' : 'none';
+}
+
+function addNewFieldOption() {
+  const input = document.getElementById('nf-option-input');
+  const val = input.value.trim();
+  if (!val) return;
+  const list = document.getElementById('nf-options-list');
+  const span = document.createElement('span');
+  span.className = 'setting-tag';
+  span.innerHTML = escHtml(val) + '<button onclick="this.closest(\".setting-tag\").remove()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:14px;padding:0 2px">×</button>';
+  list.appendChild(span);
+  input.value = '';
+  input.focus();
+}
+
+function saveNewField() {
+  const key = document.getElementById('nf-key').value.trim().toLowerCase().replace(/\s+/g,'_');
+  const label = document.getElementById('nf-label').value.trim();
+  const type = document.getElementById('nf-type').value;
+
+  if (!key) { showToast('Alan key zorunludur', 'error'); return; }
+  if (!label) { showToast('Etiket zorunludur', 'error'); return; }
+  if (!state.cfg?.listing_fields?.all_fields) return;
+  if (state.cfg.listing_fields.all_fields.find(f => f.key === key)) {
+    showToast('Bu key zaten mevcut!', 'error'); return;
+  }
+
+  let source = '';
+  if (type === 'select') {
+    // Secenekleri custom_lists'e ekle
+    const options = [...document.querySelectorAll('#nf-options-list .setting-tag')]
+      .map(t => t.childNodes[0].textContent.trim());
+    if (options.length > 0) {
+      const listKey = key + '_options';
+      if (!state.cfg.custom_lists) state.cfg.custom_lists = {};
+      state.cfg.custom_lists[listKey] = options;
+      if (!state.cfg.field_sources) state.cfg.field_sources = {};
+      state.cfg.field_sources[listKey] = options;
+      source = listKey; // "cephe" -> "cephe_options"
+    } else {
+      // Seceneksiz select - source bos kalsin
+      source = '';
+    }
+  }
+
+  const newField = {
+    key, label, type, required: false, searchable: false,
+    source,
+    show_on: {
+      form: state.cfg?.listing_types?.flatMap(lt =>
+        state.cfg?.property_types?.map(pt => lt+'/'+pt)
+      ) || [],
+      card: [], detail: [], telegram: []
+    }
+  };
+
+  state.cfg.listing_fields.all_fields.push(newField);
+  document.getElementById('new-field-overlay').classList.remove('open');
+  loadAdminFields();
+  showToast('Alan eklendi — kaydetmeyi unutmayın!');
+}
+
+function _addNewFieldOld() {
+  const key = prompt('Alan key (örn: cephe):')?.trim().toLowerCase().replace(/\s+/g,'_');
+  if (!key) return;
+  const label = prompt('Alan etiketi (örn: Cephe):')?.trim();
+  if (!label) return;
+  const type = prompt('Tip (text/select/number/textarea):', 'text')?.trim() || 'text';
+  let source = '';
+  if (type === 'select') {
+    // Mevcut kaynakları listele
+    const sources = Object.keys(state.cfg?.field_sources || {});
+    const sourceList = sources.join(', ');
+    source = prompt('Kaynak listesi:\n' + sourceList + '\n\nKaynak adı girin:')?.trim() || '';
+  }
+
+  const newField = {
+    key, label, type, required: false, searchable: false,
+    source,
+    show_on: { form:[], card:[], detail:[], telegram:[] }
+  };
+
+  if (!state.cfg?.listing_fields?.all_fields) return;
+  if (state.cfg.listing_fields.all_fields.find(f => f.key === key)) {
+    showToast('Bu key zaten mevcut!', 'error'); return;
+  }
+  state.cfg.listing_fields.all_fields.push(newField);
+  loadAdminFields();
+  showToast('Alan eklendi — kaydetmeyi unutmayın!');
+}
+
 /* ═══════════════════════════════════════════════════════
    ADMIN SETTINGS
 ════════════════════════════════════════════════════════ */
@@ -2311,6 +2575,7 @@ async function loadAdminSettings() {
     const s = await API.getAdminSettings();
     s.listing_channels    = s.listing_channels    || state.cfg?.listing_channels    || [];
     s.auto_task_templates = s.auto_task_templates || state.cfg?.auto_task_templates || [];
+    s.custom_lists        = s.custom_lists        || state.cfg?.custom_lists        || {};
     renderAdminSettings(s);
   } catch(e) { cont.innerHTML = `<div class="alert alert-error">Ayarlar yüklenemedi: ${e.message}</div>`; }
 }
@@ -2394,6 +2659,12 @@ function renderAdminSettings(s) {
         ${listEditor('heating_options', 'Isıtma Seçenekleri', s.heating_options)}
         ${listEditor('floor_options', 'Kat Seçenekleri', s.floor_options)}
         ${listEditor('zoning_options', 'İmar Seçenekleri', s.zoning_options)}
+        <h3 class="settings-section-title" style="margin-top:16px">Özel Listeler
+          <button class="btn btn-sm btn-outline" style="margin-left:8px;font-weight:400;text-transform:none" onclick="addCustomList()">+ Yeni Liste</button>
+        </h3>
+        <div id="custom-lists-container">
+          ${Object.entries(s.custom_lists||{}).map(([key,items])=>listEditor('custom_'+key, key, items)).join('')}
+        </div>
       </div>
       <div class="settings-col">
         <h3 class="settings-section-title">Yayın Kanalları & Görevler</h3>
@@ -2426,6 +2697,34 @@ function renderAdminSettings(s) {
       if (del) removeAutoTaskItem(del.dataset.at);
     });
   }, 100);
+}
+
+function addCustomList() {
+  const key = prompt('Liste adı (örn: furnished_options):')?.trim().toLowerCase().replace(/\s+/g,'_');
+  if (!key) return;
+  const label = prompt('Liste etiketi (örn: Eşya Durumu):')?.trim();
+  if (!label) return;
+  const cont = document.getElementById('custom-lists-container');
+  if (!cont) return;
+  // listEditor ile yeni liste ekle
+  const div = document.createElement('div');
+  div.innerHTML = `<div class="setting-group">
+    <div class="setting-group-header">
+      <span class="setting-group-title">${escHtml(label)}</span>
+      <button class="btn btn-sm btn-outline" onclick="addSettingItem('setting-custom_${key}')">+ Ekle</button>
+      <button class="btn btn-sm btn-danger" onclick="this.closest('.setting-group').remove()">Sil</button>
+    </div>
+    <div class="setting-tags" id="setting-custom_${key}"></div>
+  </div>`;
+  cont.appendChild(div.firstElementChild);
+  // state'e ekle
+  if (!state._adminSettings) state._adminSettings = {};
+  if (!state._adminSettings.custom_lists) state._adminSettings.custom_lists = {};
+  state._adminSettings.custom_lists[key] = [];
+  if (!state.cfg) state.cfg = {};
+  if (!state.cfg.custom_lists) state.cfg.custom_lists = {};
+  state.cfg.custom_lists[key] = [];
+  showToast('Liste eklendi — kaydetmeyi unutmayın!');
 }
 
 function addSettingItem(containerId) {
@@ -2638,6 +2937,15 @@ async function saveAdminSettings() {
   payload.request_by_property = byPropNew;
   payload.all_fields = state.cfg?.listing_fields?.all_fields || [];
 
+  // Ozel listeler
+  const customLists = {};
+  document.querySelectorAll('#custom-lists-container .setting-tags').forEach(cont => {
+    const key = cont.id.replace('setting-custom_','');
+    const items = [...cont.querySelectorAll('.setting-tag')].map(t=>t.childNodes[0].textContent.trim());
+    customLists[key] = items;
+  });
+  payload.custom_lists = customLists;
+
   // Kanallar
   const channels = [];
   document.querySelectorAll('#setting-channels .setting-toggle-row').forEach(row => {
@@ -2689,5 +2997,10 @@ async function doLogin(){
   finally{btn.textContent='Giriş Yap';btn.disabled=false;}
 }
 document.getElementById('logout-btn').addEventListener('click',async()=>{await API.logout();showLogin();});
+
+
+document.getElementById('nf-option-input')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); addNewFieldOption(); }
+});
 
 init();

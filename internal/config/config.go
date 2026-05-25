@@ -25,8 +25,9 @@ type Config struct {
 
 	ListingFields    ListingFieldsConfig `json:"listing_fields"`
 	RequestFields    RequestFieldsConfig `json:"request_fields"`
-	ListingChannels  []ChannelConfig     `json:"listing_channels"`
-	AutoTaskTemplates []AutoTaskTemplate `json:"auto_task_templates"`
+	ListingChannels  []ChannelConfig        `json:"listing_channels"`
+	AutoTaskTemplates []AutoTaskTemplate  `json:"auto_task_templates"`
+	CustomLists      map[string][]string  `json:"custom_lists"`
 }
 
 type ChannelConfig struct {
@@ -87,14 +88,22 @@ type TelegramConfig struct {
 	NotifyNewRequest bool   `json:"notify_new_request"`
 }
 
+type ShowOnConfig struct {
+	Form     []string `json:"form"`
+	Card     []string `json:"card"`
+	Detail   []string `json:"detail"`
+	Telegram []string `json:"telegram"`
+}
+
 type FieldDefinition struct {
-	Key        string `json:"key"`
-	Label      string `json:"label"`
-	Type       string `json:"type"`
-	Required   bool   `json:"required"`
-	Source     string `json:"source,omitempty"`
-	Searchable bool   `json:"searchable"`
-	AdminOnly  bool   `json:"admin_only,omitempty"`
+	Key        string       `json:"key"`
+	Label      string       `json:"label"`
+	Type       string       `json:"type"`
+	Required   bool         `json:"required"`
+	Source     string       `json:"source,omitempty"`
+	Searchable bool         `json:"searchable"`
+	AdminOnly  bool         `json:"admin_only,omitempty"`
+	ShowOn     ShowOnConfig `json:"show_on,omitempty"`
 }
 
 type ListingFieldsConfig struct {

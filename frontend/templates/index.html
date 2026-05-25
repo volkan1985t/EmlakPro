@@ -273,6 +273,7 @@
         <button class="admin-tab" data-tab="admin-listings">📋 Tüm İlanlar</button>
         <button class="admin-tab" data-tab="admin-requests">🎯 Tüm Talepler</button>
         <button class="admin-tab" data-tab="admin-settings">⚙️ Ayarlar</button>
+        <button class="admin-tab" data-tab="admin-fields">🗂 Alan Yönetimi</button>
       </div>
       <div class="admin-panel active" id="admin-users">
         <div class="toolbar">
@@ -283,12 +284,13 @@
       </div>
       <div class="admin-panel" id="admin-listings"><div id="admin-listings-list"></div></div>
       <div class="admin-panel" id="admin-requests"><div id="admin-requests-list"></div></div>
-    </div>
       <div class="admin-panel" id="admin-settings">
-        <div id="admin-settings-content">
-          <div class="empty-state"><div class="big-icon">⚙️</div><p>Yükleniyor...</p></div>
-        </div>
+        <div id="admin-settings-content"></div>
       </div>
+      <div class="admin-panel" id="admin-fields">
+        <div id="admin-fields-content"><div class="muted" style="padding:16px">Yükleniyor...</div></div>
+      </div>
+    </div>
 
   </div>
 </div>
@@ -309,6 +311,47 @@
       </div>
     </div>
     <div id="detail-content"></div>
+  </div>
+</div>
+
+<!-- YENİ ALAN MODAL -->
+<div class="overlay" id="new-field-overlay">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h3>Yeni Alan Ekle</h3>
+      <button class="close-btn" onclick="document.getElementById('new-field-overlay').classList.remove('open')">×</button>
+    </div>
+    <div class="form-group">
+      <label>Alan Key <span class="req">*</span></label>
+      <input id="nf-key" type="text" placeholder="örn: cephe">
+    </div>
+    <div class="form-group">
+      <label>Etiket <span class="req">*</span></label>
+      <input id="nf-label" type="text" placeholder="örn: Cephe">
+    </div>
+    <div class="form-group">
+      <label>Tip</label>
+      <select id="nf-type" onchange="onNewFieldTypeChange(this.value)">
+        <option value="text">Metin (text)</option>
+        <option value="select">Seçim Listesi (select)</option>
+        <option value="number">Sayı (number)</option>
+        <option value="textarea">Uzun Metin (textarea)</option>
+      </select>
+    </div>
+    <div id="nf-options-block" style="display:none">
+      <div class="form-group">
+        <label>Seçenekler</label>
+        <div style="display:flex;gap:6px;margin-bottom:6px">
+          <input id="nf-option-input" type="text" placeholder="Seçenek ekle..." style="flex:1">
+          <button class="btn btn-sm btn-outline" onclick="addNewFieldOption()">+ Ekle</button>
+        </div>
+        <div id="nf-options-list" class="setting-tags" style="min-height:32px;border:1px solid var(--border);border-radius:8px;padding:8px"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="document.getElementById('new-field-overlay').classList.remove('open')">İptal</button>
+      <button class="btn btn-gold" onclick="saveNewField()">Ekle</button>
+    </div>
   </div>
 </div>
 
@@ -650,7 +693,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="/static/js/api.js?v=202605211027"></script>
-<script src="/static/js/app.js?v=202605220816"></script>
+<script src="/static/js/app.js?v=202605250649"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

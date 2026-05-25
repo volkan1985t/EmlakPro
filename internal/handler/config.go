@@ -28,7 +28,9 @@ func (h *ConfigHandler) PublicConfig(w http.ResponseWriter, r *http.Request) {
 		"room_options":    h.cfg.RoomOptions,
 		"zoning_options":  h.cfg.ZoningOptions,
 		"heating_options": h.cfg.HeatingOptions,
-		"floor_options":   h.cfg.FloorOptions,
+	}
+	for k, v := range h.cfg.CustomLists {
+		sources[k] = v
 	}
 	jsonOK(w, model.PublicConfig{
 		AppName:       h.cfg.App.Name,
@@ -41,6 +43,7 @@ func (h *ConfigHandler) PublicConfig(w http.ResponseWriter, r *http.Request) {
 		FieldSources:      sources,
 		ListingChannels:   h.cfg.ListingChannels,
 		AutoTaskTemplates: h.cfg.AutoTaskTemplates,
+		CustomLists:       h.cfg.CustomLists,
 	})
 }
 
@@ -78,8 +81,8 @@ func (h *ConfigHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		AllFields      []config.FieldDefinition `json:"all_fields"`
 		RequestCommon  []config.FieldDefinition `json:"request_common"`
 		RequestByProp  map[string][]string      `json:"request_by_property"`
-		ListingChannels   []config.ChannelConfig    `json:"listing_channels"`
-		AutoTaskTemplates []config.AutoTaskTemplate `json:"auto_task_templates"`
+		AutoTaskTemplates []config.AutoTaskTemplate  `json:"auto_task_templates"`
+		CustomLists       map[string][]string        `json:"custom_lists"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonErr(w, "Geçersiz istek", http.StatusBadRequest)
@@ -98,7 +101,8 @@ func (h *ConfigHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if body.RequestCommon  != nil { h.cfg.RequestFields.Common        = body.RequestCommon }
 	if body.RequestByProp  != nil { h.cfg.RequestFields.ByProperty    = body.RequestByProp }
 	if body.AllFields      != nil { h.cfg.ListingFields.AllFields     = body.AllFields      }
-	if body.ListingChannels   != nil { h.cfg.ListingChannels          = body.ListingChannels }
+	if body.AutoTaskTemplates != nil { h.cfg.AutoTaskTemplates = body.AutoTaskTemplates }
+	if body.CustomLists       != nil { h.cfg.CustomLists       = body.CustomLists }
 	if body.AutoTaskTemplates != nil { h.cfg.AutoTaskTemplates        = body.AutoTaskTemplates }
 
 	f, err := os.Create(h.cfgPath)

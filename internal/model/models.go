@@ -285,4 +285,5 @@ type PublicConfig struct {
 	FieldSources  map[string][]string `json:"field_sources"`
 	ListingChannels   interface{}         `json:"listing_channels"`
 	AutoTaskTemplates interface{}         `json:"auto_task_templates"`
+	CustomLists       interface{}         `json:"custom_lists"`
 }

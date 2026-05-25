@@ -1780,3 +1780,70 @@ body {
 @media (max-width: 560px) {
   .form-row-2 { grid-template-columns: 1fr; }
 }
+
+/* ═══════════════════════════════════════════════════════
+   ALAN YÖNETİMİ
+════════════════════════════════════════════════════════ */
+.fields-toolbar {
+  display: flex; gap: 8px; margin-bottom: 16px;
+}
+.fields-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.fields-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+  background: var(--card);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.fields-table th {
+  background: #f5f7ff;
+  padding: 8px 6px;
+  font-size: 11px; font-weight: 700;
+  color: var(--muted);
+  text-align: center;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.fields-table td {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  vertical-align: middle;
+}
+.fields-table tr:hover td { background: #fafbff; }
+.combo-header {
+  min-width: 32px;
+  padding: 4px 2px !important;
+}
+.combo-lt {
+  display: block;
+  font-size: 9px;
+  color: var(--blue);
+  font-weight: 700;
+}
+.combo-pt {
+  display: block;
+  font-size: 9px;
+  color: var(--muted);
+}
+.combo-cell {
+  text-align: center;
+  padding: 4px 2px !important;
+}
+.combo-cell input[type="checkbox"] {
+  width: 14px; height: 14px;
+  cursor: pointer;
+  accent-color: var(--navy);
+}
+.field-label { font-weight: 600; font-size: 12px; }
+.field-type {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 10px;
+  color: var(--muted);
+}
