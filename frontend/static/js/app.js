@@ -2222,22 +2222,11 @@ function fieldVisible(field, context, listingType, propType) {
   if (!list.length) return false;
   if (list.includes('*')) return true;
 
-  const lt = listingType || '';
   const pt = propType || '';
 
-  // Eger lt veya pt secilmemisse ve alan bu context'te herhangi bir combo'da varsa goster
-  if (!lt && !pt) return list.length > 0;
-  if (!lt) return list.some(r => r === '*' || r.endsWith('/'+pt) || r === '*/'+pt);
-  if (!pt) return list.some(r => r === '*' || r.startsWith(lt+'/') || r === lt+'/*');
-
-  const combo = lt + '/' + pt;
-  for (const rule of list) {
-    if (rule === '*') return true;
-    if (rule === combo) return true;
-    if (rule === lt + '/*') return true;
-    if (rule === '*/' + pt) return true;
-  }
-  return false;
+  // Sadece mulk tipine gore kontrol — kiralık/satılık farketmez
+  if (!pt) return list.length > 0;
+  return list.includes(pt) || list.includes('*');
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -2346,69 +2335,119 @@ function renderAdminFields(allFields) {
   if (!cont) return;
 
   const cfg = state.cfg;
-  const listingTypes = cfg?.listing_types || ['Satılık','Kiralık'];
   const propTypes = cfg?.property_types || ['Daire','Villa','Arsa','Ticari'];
-  const combos = [];
-  listingTypes.forEach(lt => propTypes.forEach(pt => combos.push({lt, pt, key: lt+'/'+pt})));
-  const contexts = ['form','card','detail','telegram'];
-  const ctxLabels = {form:'Form', card:'Kart', detail:'Detay', telegram:'Telegram'};
+  const contexts  = ['form','card','detail','telegram'];
+  const ctxLabels = {form:'Yeni İlan', card:'Kart', detail:'Detay', telegram:'Telegram'};
 
+  // BÖLÜM 1 — Alan listesi
   let html = '<div class="fields-toolbar">' +
     '<button class="btn btn-gold" onclick="saveAdminFields()">💾 Kaydet</button>' +
     '<button class="btn btn-outline" onclick="addNewField()">+ Yeni Alan</button>' +
   '</div>';
 
-  html += '<div class="fields-table-wrap"><table class="fields-table">';
-  html += '<thead><tr><th>Alan</th><th>Tip</th>';
-  contexts.forEach(ctx => {
-    html += '<th colspan="' + combos.length + '">' + ctxLabels[ctx] + '</th>';
+  html += '<div class="af-section-title">Alan Listesi</div>';
+  html += '<div class="af-list" id="af-list">';
+  allFields.forEach((f, idx) => {
+    const taskChk   = f.show_on?.task     ? 'checked' : '';
+    const talepChk  = f.show_on?.talep    ? 'checked' : '';
+    const telChk    = f.show_on?.telegram?.length ? 'checked' : '';
+    html += '<div class="af-row" data-key="' + f.key + '" draggable="true">' +
+      '<span class="af-drag">☰</span>' +
+      '<span class="af-label">' + escHtml(f.label) + ' <small class="muted">(' + f.key + ')</small></span>' +
+      '<span class="af-type field-type">' + f.type + '</span>' +
+      '<label class="af-check-label"><input type="checkbox" class="af-meta-cb" data-key="' + f.key + '" data-meta="task" ' + taskChk + '> Görev</label>' +
+      '<label class="af-check-label"><input type="checkbox" class="af-meta-cb" data-key="' + f.key + '" data-meta="talep" ' + talepChk + '> Talep</label>' +
+      '<button class="btn btn-sm btn-outline" onclick="editField(\'' + f.key + '\')">✏️</button>' +
+      '<button class="btn btn-sm btn-danger" onclick="removeField(\'' + f.key + '\')">🗑</button>' +
+    '</div>';
   });
-  html += '<th></th></tr>';
+  html += '</div>';
 
-  // Alt başlık satırı
-  html += '<tr><th></th><th></th>';
+  // BÖLÜM 2 — Görünüm checkboxları
+  html += '<div class="af-section-title" style="margin-top:24px">Görünüm Ayarları</div>';
+  html += '<div class="fields-table-wrap"><table class="fields-table"><thead><tr>';
+  html += '<th rowspan="2">Alan</th>';
+  contexts.forEach(ctx => {
+    html += '<th colspan="' + propTypes.length + '">' + ctxLabels[ctx] + '</th>';
+  });
+  html += '</tr><tr>';
   contexts.forEach(() => {
-    combos.forEach(c => {
-      html += '<th class="combo-header"><span class="combo-lt">' + c.lt[0] + '</span><span class="combo-pt">' + c.pt.slice(0,3) + '</span></th>';
+    propTypes.forEach(pt => {
+      html += '<th class="combo-header"><span class="combo-pt">' + pt.slice(0,3) + '</span></th>';
     });
   });
-  html += '<th></th></tr></thead><tbody>';
+  html += '</tr></thead><tbody>';
 
-  allFields.forEach((f, idx) => {
-    html += '<tr data-key="' + f.key + '">';
-    html += '<td><span class="field-label">' + escHtml(f.label) + '</span><small class="muted"> (' + f.key + ')</small></td>';
-    html += '<td><span class="field-type">' + f.type + '</span></td>';
-
+  allFields.forEach(f => {
+    html += '<tr data-key="' + f.key + '"><td><span class="field-label">' + escHtml(f.label) + '</span></td>';
     contexts.forEach(ctx => {
       const showList = f.show_on?.[ctx] || [];
-      combos.forEach(c => {
-        const checked = showList.includes('*') ||
-          showList.includes(c.key) ||
-          showList.includes(c.lt + '/*') ||
-          showList.includes('*/' + c.pt);
-        html += '<td class="combo-cell">' +
-          '<input type="checkbox" class="field-cb" ' +
-          'data-field="' + f.key + '" data-ctx="' + ctx + '" data-combo="' + c.key + '"' +
-          (checked ? ' checked' : '') + '>' +
-          '</td>';
+      propTypes.forEach(pt => {
+        const checked = showList.includes('*') || showList.includes(pt);
+        html += '<td class="combo-cell"><input type="checkbox" class="field-cb"' +
+          ' data-field="' + f.key + '" data-ctx="' + ctx + '" data-combo="' + pt + '"' +
+          (checked ? ' checked' : '') + '></td>';
       });
     });
-
-    html += '<td><button class="btn btn-sm btn-danger" onclick="removeField(\'' + f.key + '\')" title="Sil">🗑</button></td>';
     html += '</tr>';
   });
 
   html += '</tbody></table></div>';
   cont.innerHTML = html;
+
+  // Drag & drop sıralama
+  initFieldDragSort();
+}
+
+function initFieldDragSort() {
+  const list = document.getElementById('af-list');
+  if (!list) return;
+  let dragEl = null;
+  list.querySelectorAll('.af-row').forEach(row => {
+    row.addEventListener('dragstart', e => { dragEl = row; row.classList.add('dragging'); e.stopPropagation(); });
+    row.addEventListener('dragend',   e => { row.classList.remove('dragging'); dragEl = null; });
+    row.addEventListener('dragover',  e => {
+      e.preventDefault();
+      if (!dragEl || dragEl === row) return;
+      const rect = row.getBoundingClientRect();
+      const mid  = rect.top + rect.height/2;
+      if (e.clientY < mid) list.insertBefore(dragEl, row);
+      else list.insertBefore(dragEl, row.nextSibling);
+    });
+  });
+}
+
+function editField(key) {
+  const f = state.cfg?.listing_fields?.all_fields?.find(x => x.key === key);
+  if (!f) return;
+  document.getElementById('nf-key').value   = f.key;
+  document.getElementById('nf-label').value = f.label;
+  document.getElementById('nf-type').value  = f.type;
+  onNewFieldTypeChange(f.type);
+  // Secenekleri doldur
+  const optList = document.getElementById('nf-options-list');
+  optList.innerHTML = '';
+  if (f.type === 'select' && f.source) {
+    const opts = state.cfg?.field_sources?.[f.source] || [];
+    opts.forEach(o => {
+      const span = document.createElement('span');
+      span.className = 'setting-tag';
+      span.innerHTML = escHtml(o) + '<button onclick="this.closest(\'.setting-tag\').remove()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:14px;padding:0 2px">×</button>';
+      optList.appendChild(span);
+    });
+  }
+  document.getElementById('new-field-overlay').classList.add('open');
+  // Kaydet butonunu guncelle modunu ac
+  document.querySelector('#new-field-overlay .btn-gold').onclick = () => saveNewField(key);
 }
 
 async function saveAdminFields() {
   const cfg = state.cfg;
-  const listingTypes = cfg?.listing_types || ['Satılık','Kiralık'];
   const propTypes = cfg?.property_types || ['Daire','Villa','Arsa','Ticari'];
-  const combos = [];
-  listingTypes.forEach(lt => propTypes.forEach(pt => combos.push(lt+'/'+pt)));
-  const contexts = ['form','card','detail','telegram'];
+  const contexts  = ['form','card','detail'];
+
+  // Sıralama — af-list'teki sıraya göre
+  const orderedKeys = [...document.querySelectorAll('#af-list .af-row')].map(r => r.dataset.key);
 
   // Her alan için show_on topla
   const allFields = state.cfg?.listing_fields?.all_fields || [];
@@ -2420,26 +2459,43 @@ async function saveAdminFields() {
     };
   });
 
+  // Görünüm checkboxları
   document.querySelectorAll('.field-cb').forEach(cb => {
     if (!cb.checked) return;
-    const key = cb.dataset.field;
-    const ctx = cb.dataset.ctx;
+    const key   = cb.dataset.field;
+    const ctx   = cb.dataset.ctx;
     const combo = cb.dataset.combo;
-    if (fieldMap[key]) {
-      if (!fieldMap[key].show_on[ctx].includes(combo)) {
-        fieldMap[key].show_on[ctx].push(combo);
-      }
+    if (fieldMap[key] && !fieldMap[key].show_on[ctx].includes(combo)) {
+      fieldMap[key].show_on[ctx].push(combo);
     }
   });
 
-  const updatedFields = Object.values(fieldMap);
+  // Meta checkboxlar (görev, talep, telegram)
+  document.querySelectorAll('.af-meta-cb').forEach(cb => {
+    const key  = cb.dataset.key;
+    const meta = cb.dataset.meta;
+    if (!fieldMap[key]) return;
+    if (meta === 'telegram') {
+      fieldMap[key].show_on.telegram = cb.checked ? propTypes : [];
+    } else {
+      fieldMap[key][meta] = cb.checked;
+    }
+  });
 
-  // state.cfg guncelle
+  // Sıralamaya göre diz
+  const updatedFields = orderedKeys
+    .map(k => fieldMap[k])
+    .filter(Boolean);
+
+  // Sıralamada olmayan alanları sona ekle
+  allFields.forEach(f => {
+    if (!orderedKeys.includes(f.key)) updatedFields.push(fieldMap[f.key]);
+  });
+
   if (state.cfg?.listing_fields) {
     state.cfg.listing_fields.all_fields = updatedFields;
   }
 
-  // Custom listleri de kaydet
   const customListsPayload = state.cfg?.custom_lists || {};
 
   try {
@@ -2584,96 +2640,16 @@ function renderAdminSettings(s) {
   const cont = document.getElementById('admin-settings-content');
   if (!cont) return;
 
-  function listEditor(key, label, items) {
-    const id = 'setting-'+key;
-    return `<div class="setting-group">
-      <div class="setting-group-header">
-        <span class="setting-group-title">${label}</span>
-        <button class="btn btn-sm btn-outline" onclick="addSettingItem('${id}')">+ Ekle</button>
-      </div>
-      <div class="setting-tags" id="${id}">
-        ${(items||[]).map(v=>`
-          <span class="setting-tag">
-            ${escHtml(v)}
-            <button onclick="removeSettingItem('${id}',this)" data-val="${escHtml(v)}">&times;</button>
-          </span>`).join('')}
-      </div>
-    </div>`;
-  }
-
-  const allRequestFields = [
-    {key:'listing_type', label:'Satılık/Kiralık'},
-    {key:'property_type', label:'Mülk Tipi'},
-    {key:'district', label:'İlçe Tercihi'},
-    {key:'budget', label:'Bütçe'},
-    {key:'notes', label:'Notlar'},
-  ];
-  const activeCommon = (s.request_fields?.common||[]).map(f=>f.key);
-  const requestToggles = allRequestFields.map(f=>`
-    <div class="setting-toggle-row">
-      <span>${f.label}</span>
-      <button class="talep-toggle-btn${activeCommon.includes(f.key)?' on':''}"
-        id="rtoggle-${f.key}"
-        onclick="this.classList.toggle('on');this.querySelector('.talep-toggle-text').textContent=this.classList.contains('on')?'Açık':'Kapalı'">
-        <span class="talep-toggle-knob"></span>
-        <span class="talep-toggle-text">${activeCommon.includes(f.key)?'Açık':'Kapalı'}</span>
-      </button>
-    </div>`).join('');
-
-  const allListingFields = (s.all_fields || state.cfg?.listing_fields?.all_fields || [])
-    .filter(f=>!['title','price','description','notes','listing_type','property_type'].includes(f.key));
-  const byProp = s.request_fields?.by_property||{};
-  const propTypes = s.property_types||[];
-  const byPropToggles = propTypes.map(pt=>`
-    <div class="setting-group">
-      <div class="setting-group-header">
-        <span class="setting-group-title">${pt}</span>
-        <button class="btn btn-sm btn-outline" onclick="addCustomField('${pt}')">+ Özel Alan</button>
-      </div>
-      ${allListingFields.map(f=>`
-        <div class="setting-toggle-row">
-          <span>${f.label} <small class="muted">(${f.key})</small></span>
-          <button class="talep-toggle-btn${(byProp[pt]||[]).includes(f.key)?' on':''}"
-            id="byprop-${pt}-${f.key}"
-            onclick="this.classList.toggle('on');this.querySelector('.talep-toggle-text').textContent=this.classList.contains('on')?'Açık':'Kapalı'">
-            <span class="talep-toggle-knob"></span>
-            <span class="talep-toggle-text">${(byProp[pt]||[]).includes(f.key)?'Açık':'Kapalı'}</span>
-          </button>
-        </div>`).join('')}
-      <div id="custom-fields-${pt}"></div>
-    </div>`).join('');
-
-  // Kanallar ve gorevler HTML'i fonksiyonlarla uret
-  const channelsHTML = buildChannelsHTML(s.listing_channels||[]);
+  const channelsHTML  = buildChannelsHTML(s.listing_channels||[]);
   const autoTasksHTML = buildAutoTasksHTML(s.auto_task_templates||[]);
 
-    cont.innerHTML = `
+  cont.innerHTML = `
     <div class="settings-grid">
       <div class="settings-col">
-        <h3 class="settings-section-title">Listeler</h3>
-        ${listEditor('property_types', 'Mülk Tipleri', s.property_types)}
-        ${listEditor('listing_types', 'İlan Tipleri', s.listing_types)}
-        ${listEditor('districts', 'İlçeler', s.districts)}
-        ${listEditor('neighborhoods', 'Mahalleler', s.neighborhoods)}
-        ${listEditor('room_options', 'Oda Seçenekleri', s.room_options)}
-        ${listEditor('heating_options', 'Isıtma Seçenekleri', s.heating_options)}
-        ${listEditor('floor_options', 'Kat Seçenekleri', s.floor_options)}
-        ${listEditor('zoning_options', 'İmar Seçenekleri', s.zoning_options)}
-        <h3 class="settings-section-title" style="margin-top:16px">Özel Listeler
-          <button class="btn btn-sm btn-outline" style="margin-left:8px;font-weight:400;text-transform:none" onclick="addCustomList()">+ Yeni Liste</button>
-        </h3>
-        <div id="custom-lists-container">
-          ${Object.entries(s.custom_lists||{}).map(([key,items])=>listEditor('custom_'+key, key, items)).join('')}
-        </div>
+        ${channelsHTML}
       </div>
       <div class="settings-col">
-        <h3 class="settings-section-title">Yayın Kanalları & Görevler</h3>
-        ${channelsHTML}
         ${autoTasksHTML}
-        <h3 class="settings-section-title" style="margin-top:16px">Talep Formu Alanları</h3>
-        <div class="setting-group">${requestToggles}</div>
-        <h3 class="settings-section-title" style="margin-top:16px">Mülke Göre Ek Alanlar</h3>
-        ${byPropToggles}
       </div>
     </div>
     <div class="settings-footer">
@@ -2682,7 +2658,6 @@ function renderAdminSettings(s) {
 
   state._adminSettings = s;
 
-  // Toggle butonlari icin delegation
   setTimeout(() => {
     document.getElementById('setting-channels')?.addEventListener('click', e => {
       const btn = e.target.closest('.talep-toggle-btn');
@@ -2697,34 +2672,6 @@ function renderAdminSettings(s) {
       if (del) removeAutoTaskItem(del.dataset.at);
     });
   }, 100);
-}
-
-function addCustomList() {
-  const key = prompt('Liste adı (örn: furnished_options):')?.trim().toLowerCase().replace(/\s+/g,'_');
-  if (!key) return;
-  const label = prompt('Liste etiketi (örn: Eşya Durumu):')?.trim();
-  if (!label) return;
-  const cont = document.getElementById('custom-lists-container');
-  if (!cont) return;
-  // listEditor ile yeni liste ekle
-  const div = document.createElement('div');
-  div.innerHTML = `<div class="setting-group">
-    <div class="setting-group-header">
-      <span class="setting-group-title">${escHtml(label)}</span>
-      <button class="btn btn-sm btn-outline" onclick="addSettingItem('setting-custom_${key}')">+ Ekle</button>
-      <button class="btn btn-sm btn-danger" onclick="this.closest('.setting-group').remove()">Sil</button>
-    </div>
-    <div class="setting-tags" id="setting-custom_${key}"></div>
-  </div>`;
-  cont.appendChild(div.firstElementChild);
-  // state'e ekle
-  if (!state._adminSettings) state._adminSettings = {};
-  if (!state._adminSettings.custom_lists) state._adminSettings.custom_lists = {};
-  state._adminSettings.custom_lists[key] = [];
-  if (!state.cfg) state.cfg = {};
-  if (!state.cfg.custom_lists) state.cfg.custom_lists = {};
-  state.cfg.custom_lists[key] = [];
-  showToast('Liste eklendi — kaydetmeyi unutmayın!');
 }
 
 function addSettingItem(containerId) {
