@@ -26,6 +26,7 @@ type Config struct {
 	ListingFields    ListingFieldsConfig `json:"listing_fields"`
 	RequestFields    RequestFieldsConfig `json:"request_fields"`
 	ListingChannels  []ChannelConfig        `json:"listing_channels"`
+	DailySummary     DailySummaryConfig     `json:"daily_summary"`
 	AutoTaskTemplates []AutoTaskTemplate  `json:"auto_task_templates"`
 	CustomLists      map[string][]string  `json:"custom_lists"`
 }
@@ -78,6 +79,12 @@ type AdminConfig struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 	FullName string `json:"full_name"`
+}
+
+type DailySummaryConfig struct {
+	Enabled     bool `json:"enabled"`
+	Hour        int  `json:"hour"`         // 0-23, default 9
+	SendSunday  bool `json:"send_sunday"`  // default false
 }
 
 type TelegramConfig struct {

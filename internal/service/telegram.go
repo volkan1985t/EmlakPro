@@ -20,10 +20,18 @@ type TGUpdate struct {
 	CallbackQuery *TGCallback `json:"callback_query"`
 }
 
+type TGPhotoSize struct {
+	FileID   string `json:"file_id"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	FileSize int    `json:"file_size"`
+}
+
 type TGMessage struct {
-	MessageID int64   `json:"message_id"`
-	Chat      TGChat  `json:"chat"`
-	Text      string  `json:"text"`
+	MessageID int64          `json:"message_id"`
+	Chat      TGChat         `json:"chat"`
+	Text      string         `json:"text"`
+	Photo     []TGPhotoSize  `json:"photo"`  // en büyük boyut son eleman
 }
 
 type TGChat struct {
@@ -78,6 +86,43 @@ func (s *TelegramService) SetUpdateHandler(fn func(TGUpdate)) {
 
 // ── Send methods ──────────────────────────────────────────────
 
+// GetFileURL — Telegram file_id'den indirilebilir URL döndürür
+func (s *TelegramService) GetFileURL(fileID string) (string, error) {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/getFile?file_id=%s", s.token, fileID)
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var result struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			FilePath string `json:"file_path"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	if !result.OK || result.Result.FilePath == "" {
+		return "", fmt.Errorf("dosya bulunamadı")
+	}
+	return fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", s.token, result.Result.FilePath), nil
+}
+
+// DownloadFile — URL'den dosya içeriğini indirir
+func (s *TelegramService) DownloadFile(fileURL string) ([]byte, error) {
+	resp, err := http.Get(fileURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	buf := new(bytes.Buffer)
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func (s *TelegramService) sendRaw(chatID int64, text string, replyMarkup interface{}) {
 	if !s.enabled {
 		return
@@ -122,6 +167,34 @@ func (s *TelegramService) SendNotification(chatID int64, text string) error {
 // SendMessage sends a message with an optional inline keyboard.
 func (s *TelegramService) SendMessage(chatID int64, text string, kb interface{}) {
 	s.sendRaw(chatID, text, kb)
+}
+
+// AnswerCallback — callback query'ye cevap ver (spinner'ı temizler, zorunlu)
+func (s *TelegramService) AnswerCallback(callbackID string) {
+	if !s.enabled { return }
+	payload := map[string]interface{}{"callback_query_id": callbackID}
+	body, _ := json.Marshal(payload)
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/answerCallbackQuery", s.token)
+	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil { log.Printf("[telegram] answerCallback hatası: %v", err); return }
+	resp.Body.Close()
+}
+
+// RemoveKeyboard — gönderilen mesajdaki inline keyboard'u kaldır (async)
+func (s *TelegramService) RemoveKeyboard(chatID int64, messageID int64) {
+	if !s.enabled { return }
+	go func() {
+		payload := map[string]interface{}{
+			"chat_id":      chatID,
+			"message_id":   messageID,
+			"reply_markup": map[string]interface{}{"inline_keyboard": []interface{}{}},
+		}
+		body, _ := json.Marshal(payload)
+		url := fmt.Sprintf("https://api.telegram.org/bot%s/editMessageReplyMarkup", s.token)
+		resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+		if err != nil { log.Printf("[telegram] removeKeyboard hatası: %v", err); return }
+		resp.Body.Close()
+	}()
 }
 
 // ── Task notifications ────────────────────────────────────────
@@ -276,6 +349,14 @@ func OptionsKeyboard(opts []string, prefix string) *TGInlineKeyboard {
 	}
 	rows = append(rows, []TGInlineButton{{Text: "❌ İptal", CallbackData: "wizard_cancel"}})
 	return &TGInlineKeyboard{InlineKeyboard: rows}
+}
+
+// SkipKeyboard — metin girişi adımlarında "Geç" butonu gösterir
+func SkipKeyboard(stepKey string) *TGInlineKeyboard {
+	return &TGInlineKeyboard{InlineKeyboard: [][]TGInlineButton{
+		{{Text: "Geç ➡️", CallbackData: "wiz_skip_" + stepKey}},
+		{{Text: "❌ İptal", CallbackData: "wizard_cancel"}},
+	}}
 }
 
 func YesNoKeyboard(yesData, noData string) *TGInlineKeyboard {

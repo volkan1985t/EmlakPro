@@ -24,7 +24,6 @@ func NewRequestHandler(cfg *config.Config, requestRepo *repository.RequestReposi
 // GET /api/requests
 func (h *RequestHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID, _ := middleware.GetUserID(r.Context())
-	isAdmin := middleware.IsAdmin(r.Context())
 
 	f := repository.RequestFilter{
 		ListingType:  r.URL.Query().Get("listing_type"),
@@ -32,7 +31,8 @@ func (h *RequestHandler) List(w http.ResponseWriter, r *http.Request) {
 		District:     r.URL.Query().Get("district"),
 		Search:       r.URL.Query().Get("q"),
 	}
-	if !isAdmin {
+	// "Benim taleplerim" filtresi
+	if r.URL.Query().Get("mine") == "1" {
 		f.UserID = userID
 	}
 

@@ -111,7 +111,8 @@ func (s *ImageService) saveImage(r io.Reader, originalName, propType string, lis
 	// Public URL
 	relPath := strings.TrimPrefix(destPath, s.cfg.App.UploadDir+"/")
 	relPath = strings.TrimPrefix(relPath, s.cfg.App.UploadDir)
-	publicURL := fmt.Sprintf("%s/uploads/%s", s.cfg.App.BaseURL, filepath.ToSlash(relPath))
+	// Göreceli URL — hangi domain/IP'den erişilirse erişilsin çalışır
+	publicURL := fmt.Sprintf("/uploads/%s", filepath.ToSlash(relPath))
 
 	return &UploadResult{
 		Path:      destPath,
@@ -227,7 +228,8 @@ func (s *ImageService) PathToURL(filePath string) string {
 	if idx := strings.Index(clean, "uploads/"); idx >= 0 {
 		clean = clean[idx+len("uploads/"):]
 	}
-	return fmt.Sprintf("%s/uploads/%s", s.cfg.App.BaseURL, clean)
+	// Göreceli URL — hangi domain/IP'den erişilirse erişilsin çalışır
+	return fmt.Sprintf("/uploads/%s", clean)
 }
 
 func sanitizePropType(propType string) string {

@@ -127,9 +127,13 @@
     <!-- TALEPLER -->
     <div class="page" id="page-talepler">
       <div class="toolbar">
-        <input type="text" id="talep-search" placeholder="🔍 Müşteri veya talep ara..." class="toolbar-search">
+        <input type="text" id="talep-search" placeholder="Talep ara..." class="toolbar-search">
         <select id="talep-tip-filter"><option value="">Satılık / Kiralık</option></select>
         <select id="talep-ilce-filter"><option value="">Tüm İlçeler</option></select>
+        <div class="toolbar-toggle-group">
+          <button class="toolbar-toggle active" id="talep-tumü-btn" onclick="talepViewToggle('tum',this)">Tüm Talepler</button>
+          <button class="toolbar-toggle" id="talep-benim-btn" onclick="talepViewToggle('benim',this)">Benim Taleplerim</button>
+        </div>
         <button class="btn btn-gold btn-sm" style="margin-left:auto" id="yeni-talep-btn">+ Talep Ekle</button>
       </div>
       <div class="talep-list" id="talep-list"></div>
@@ -205,7 +209,7 @@
         <div class="kanban-col" id="col-bekliyor" data-status="bekliyor">
           <div class="kanban-col-header">
             <span class="status-dot dot-bekliyor"></span>
-            <span>Bekliyor</span>
+            <span>Başladı</span>
             <span class="kanban-count" id="cnt-bekliyor">0</span>
           </div>
           <div class="kanban-cards" id="cards-bekliyor" data-status="bekliyor"></div>

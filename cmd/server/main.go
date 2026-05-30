@@ -63,7 +63,7 @@ func main() {
 	imageSvc    := service.NewImageService(cfg)
 	telegramSvc := service.NewTelegramService(&cfg.Telegram, userRepo)
 	notifySvc   := service.NewNotificationService(telegramSvc)
-	botHandler  := handler.NewBotHandler(cfg, telegramSvc, db, userRepo, listingRepo, requestRepo)
+	botHandler  := handler.NewBotHandler(cfg, telegramSvc, imageSvc, notifySvc, db, userRepo, listingRepo, requestRepo, taskRepo, customerRepo)
 	telegramSvc.SetUpdateHandler(botHandler.Handle)
 	telegramSvc.StartPolling()
 
@@ -76,6 +76,16 @@ func main() {
 	authHandler      := handler.NewAuthHandler(cfg, userRepo, tokenSvc)
 	listingHandler   := handler.NewListingHandler(cfg, listingRepo, imageSvc)
 	listingHandler.SetNotificationDeps(notifySvc, userRepo, requestRepo)
+
+	// Günlük özet servisi
+	summaryHour := cfg.DailySummary.Hour
+	if summaryHour == 0 { summaryHour = 9 }
+	dailySvc := service.NewDailySummaryService(db, telegramSvc, service.DailySummaryCfg{
+		Enabled:    cfg.DailySummary.Enabled,
+		Hour:       summaryHour,
+		SendSunday: cfg.DailySummary.SendSunday,
+	})
+	dailySvc.Start()
 	uploadHandler    := handler.NewUploadHandler(cfg, imageSvc)
 	requestHandler   := handler.NewRequestHandler(cfg, requestRepo)
 	adminHandler     := handler.NewAdminHandler(cfg, userRepo, listingRepo, requestRepo, imageSvc)
@@ -103,13 +113,24 @@ func main() {
 	r.Handle("/static/*", http.StripPrefix("/static/",
 		http.FileServer(http.Dir("./frontend/static"))))
 
+	// Health check
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		if err := db.Ping(); err != nil {
+			http.Error(w, `{"status":"error","db":"down"}`, http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok","version":"` + version + `"}`))
+	})
+
 	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","version":"%s"}`, version)
 	})
 
 	r.Route("/api", func(r chi.Router) {
-		r.Post("/auth/login",   authHandler.Login)
+		rateLimiter := middleware.NewRateLimiter()
+	r.With(rateLimiter.LoginRateLimit).Post("/auth/login", authHandler.Login)
 		r.Post("/auth/refresh", authHandler.Refresh)
 		r.Get("/config",        configHandler.PublicConfig)
 		r.Get("/listings/share/{token}", listingHandler.GetByShareToken)

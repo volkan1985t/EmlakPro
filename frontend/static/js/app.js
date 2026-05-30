@@ -26,7 +26,9 @@ async function init() {
   try {
     await loadConfig();
     showApp();
-    await Promise.all([loadListings(), loadRequests()]);
+    // Önce ilanları yükle — talepler eşleşme için state.listings'e ihtiyaç duyar
+    await loadListings();
+    await loadRequests();
   } catch(e) { showLogin(); }
 }
 
@@ -220,6 +222,8 @@ async function loadListings() {
   try {
     state.listings = await API.getListings(params)||[];
     renderListings();
+    // Talepler zaten yüklüyse eşleşmeleri güncelle
+    if (state.requests.length) renderRequests();
   } catch(e) { showToast('İlanlar yüklenemedi: '+e.message,'error'); }
 }
 
@@ -281,7 +285,13 @@ function renderListings() {
         ${imgHTML}${badge}${unlistedBadge}${noTag}${ownerActions}
       </div>
       <div class="card-body">
-        <div class="card-title">${il.fields?.title||'—'}</div>
+        <div class="card-title-row">
+          <div class="card-title">${il.fields?.title||'—'}</div>
+          <div class="card-type-badges">
+            ${il.fields?.property_type ? `<span class="card-ptype">${il.fields.property_type}</span>` : ''}
+            ${il.fields?.listing_type ? `<span class="card-ltype card-ltype-${il.fields.listing_type==='Satılık'?'sale':'rent'}">${il.fields.listing_type}</span>` : ''}
+          </div>
+        </div>
         <div class="card-meta">${tagsHTML}</div>
         <div class="card-footer">
           <div class="price">${priceDisplay}</div>
@@ -1048,12 +1058,17 @@ function renderGalleryPreview() {
    TALEPLER
 ════════════════════════════════════════════════════════ */
 async function loadRequests() {
-  try { state.requests=await API.getRequests()||[]; renderRequests(); }
+  try {
+    await ensureUsers();
+    state.requests=await API.getRequests({})||[]; renderRequests(); }
   catch(e) { showToast('Talepler yüklenemedi: '+e.message,'error'); }
 }
 
 function calcMatchScore(talep, ilan) {
   if(!ilan.is_active) return 0;
+  // Mülk tipi ve satış tipi belirtilmişse kesin eşleşme zorunlu
+  if(talep.fields?.property_type && talep.fields.property_type !== ilan.fields?.property_type) return 0;
+  if(talep.fields?.listing_type  && talep.fields.listing_type  !== ilan.fields?.listing_type)  return 0;
   let score=0, total=0;
   const check=(tVal,iVal,w)=>{ total+=w; if(!tVal) score+=w; else if(tVal===iVal) score+=w; };
   check(talep.fields?.listing_type,  ilan.fields?.listing_type,  25);
@@ -1064,9 +1079,11 @@ function calcMatchScore(talep, ilan) {
   const budgetMin = parseInt(talep.fields?.budget_min)||0;
   const price     = parseInt(ilan.fields?.price_max||ilan.fields?.price)||0;
   if (!budgetMax) score+=20;
-  else if (price<=budgetMax) score+=20;
-  else if (price<=budgetMax*1.1) score+=10;
-  if (budgetMin && price < budgetMin) return 0;
+  else if (price<=budgetMax) score+=20;          // bütçe içinde
+  else if (price<=budgetMax*1.1) score+=10;      // %10 üstüne kadar kısmi puan
+  else return 0;                                 // %10 üstünde — eşleşme yok
+  // Alt sınır: bütçe_min'in %10 altına kadar kabul et
+  if (budgetMin && price < budgetMin*0.9) return 0;
   total+=15;
   const tOda=talep.fields?.rooms, iOda=ilan.fields?.rooms;
   if(!tOda) score+=15; else if(tOda===iOda) score+=15;
@@ -1080,106 +1097,178 @@ function scoreColor(pct) {
 }
 
 function renderRequests() {
-  const list=document.getElementById('talep-list');
-  const q =document.getElementById('talep-search')?.value?.toLowerCase()||'';
-  const lt=document.getElementById('talep-tip-filter')?.value||'';
-  const d =document.getElementById('talep-ilce-filter')?.value||'';
-  let data=state.requests.filter(t=>{
-    if(lt&&t.fields?.listing_type!==lt) return false;
-    if(d&&t.fields?.district!==d) return false;
-    if(q&&!t.fields?.client_name?.toLowerCase().includes(q)&&!t.fields?.district?.toLowerCase().includes(q)) return false;
+  const list = document.getElementById('talep-list');
+  const q    = document.getElementById('talep-search')?.value?.toLowerCase()||'';
+  const lt   = document.getElementById('talep-tip-filter')?.value||'';
+  const d    = document.getElementById('talep-ilce-filter')?.value||'';
+  const benim = document.getElementById('talep-benim-btn')?.classList.contains('active');
+  const myID  = API.getUserID();
+
+  let data = state.requests.filter(t => {
+    if (lt && t.fields?.listing_type !== lt) return false;
+    if (d  && t.fields?.district     !== d)  return false;
+    if (benim && t.user_id !== myID)          return false;
+    if (q && !t.fields?.client_name?.toLowerCase().includes(q)
+          && !t.fields?.district?.toLowerCase().includes(q)) return false;
     return true;
   });
-  if(!data.length){
-    list.innerHTML='<div class="empty-state"><div class="big-icon">🎯</div><p>Talep bulunamadı.</p></div>';
+
+  if (!data.length) {
+    list.innerHTML = '<div class="empty-state"><div class="big-icon">🎯</div><p>Talep bulunamadı.</p></div>';
     return;
   }
-  const colors=['#1565C0','#6a1b9a','#1b5e20','#c62828','#e65100','#00695c'];
-  list.innerHTML=data.map((t,idx)=>{
-    const c=colors[idx%colors.length];
-    const harf=(t.fields?.client_name||'M')[0].toUpperCase();
-    const matches=state.listings
-      .map(il=>({il,score:calcMatchScore(t,il)}))
-      .filter(m=>m.score>0)
-      .sort((a,b)=>b.score-a.score);
 
-    const bMin=t.fields?.budget_min, bMax=t.fields?.budget_max||t.fields?.budget;
-    const budgetDisplay = bMin&&bMax
+  const avatarColors = ['#1565C0','#6a1b9a','#1b5e20','#c62828','#e65100','#00695c'];
+
+  list.innerHTML = data.map((t, idx) => {
+    const c      = avatarColors[idx % avatarColors.length];
+    const harf   = (t.fields?.client_name||'M')[0].toUpperCase();
+    const isOwner = String(t.user_id) === String(myID);
+
+    const matches = state.listings
+      .map(il => ({il, score: calcMatchScore(t, il)}))
+      .filter(m => m.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    const bMin = t.fields?.budget_min;
+    const bMax = t.fields?.budget_max || t.fields?.budget;
+    const budgetDisplay = bMin && bMax
       ? `${fiyatFormat(bMin)} – ${fiyatFormat(bMax)}`
-      : bMax ? `max ${fiyatFormat(bMax)}` : '';
+      : bMax ? `maks ${fiyatFormat(bMax)}` : '';
 
-    const tags=[
-      t.fields?.listing_type  ?`<span class="tag tag-blue">${t.fields.listing_type}</span>`:'',
-      t.fields?.property_type ?`<span class="tag tag-purple">${t.fields.property_type}</span>`:'',
-      t.fields?.district      ?`<span class="tag tag-green">${t.fields.district}</span>`:'',
-      budgetDisplay           ?`<span class="tag tag-amber">${budgetDisplay}</span>`:'',
-    ].join('');
+    // Eşleşme badge rengi
+    const matchBadgeClass = matches.length >= 3 ? 'match-high'
+      : matches.length >= 1 ? 'match-mid' : 'match-zero';
 
-    return `<div class="talep-card${t.is_active?'':' talep-passive'}" id="talep-${t.id}">
-      <div class="talep-header" onclick="toggleTalepAcc(${t.id})">
-        <div class="talep-avatar" style="background:${c}22;color:${c}">${harf}</div>
-        <div class="talep-info">
-          <div class="talep-name">${t.fields?.client_name||'—'}<span class="phone"> · ${t.fields?.phone||''}</span></div>
-          <div class="talep-desc">${t.fields?.notes||''}</div>
-          <div class="talep-tags">${tags}</div>
+    // Kriterler + açıklama
+    const tags = [
+      t.fields?.listing_type  ? `<span class="rq-tag t-blue">${t.fields.listing_type}</span>`  : '',
+      t.fields?.property_type ? `<span class="rq-tag t-purple">${t.fields.property_type}</span>` : '',
+      t.fields?.district      ? `<span class="rq-tag t-green">${t.fields.district}</span>`     : '',
+      t.fields?.neighborhood  ? `<span class="rq-tag t-teal">${t.fields.neighborhood}</span>`  : '',
+      t.fields?.rooms         ? `<span class="rq-tag t-gray">${t.fields.rooms}</span>`         : '',
+      budgetDisplay           ? `<span class="rq-tag t-amber">${budgetDisplay}</span>`         : '',
+    ].filter(Boolean).join('');
+
+    const notesHTML = t.fields?.notes
+      ? `<div class="rq-note">${escHtml(t.fields.notes)}</div>` : '';
+
+    // Talep sahibi adı
+    const ownerUser = state.allUsers?.find(u => u.id === t.user_id);
+    const ownerName = ownerUser?.full_name || ownerUser?.username || '?';
+    const nameHTML = isOwner
+      ? `<span class="rq-owner"><i class="ti ti-user"></i> ${escHtml(ownerName)}</span>
+         <span class="rq-mine">Benim müşterim</span>`
+      : `<span class="rq-owner"><i class="ti ti-user"></i> ${escHtml(ownerName)}</span>`;
+
+    // Akordiyon içi — sadece owner ise Malik butonu
+    const musteriKart = (isOwner && t.customer_id) ? `
+      <div class="rq-malik-row">
+        <button class="rq-malik-btn" onclick="goToMalik(${t.customer_id});event.stopPropagation()">
+          <i class="ti ti-user"></i> Müşteriye Git
+        </button>
+      </div>` : '';
+
+    // İlanlar
+    const ilanlarHTML = !matches.length
+      ? '<div class="rq-empty"><i class="ti ti-search"></i> Eşleşen ilan bulunamadı</div>'
+      : matches.map(({il, score}) => {
+          const r = scoreColor(score);
+          const propType = il.fields?.property_type||'Daire';
+          const cardKeys = state.cfg?.listing_fields?.card_fields?.[propType]||[];
+          const priceMin = il.fields?.price_min, priceMax = il.fields?.price_max;
+          const priceDisp = priceMin||priceMax
+            ? (priceMin&&priceMax ? `${fiyatFormat(priceMin)}–${fiyatFormat(priceMax)}` : fiyatFormat(priceMin||priceMax))
+            : fiyatFormat(il.fields?.price);
+          const thumb = il.cover_image
+            ? `<img src="${il.cover_image}" class="rq-ilan-thumb" loading="lazy" alt="">`
+            : `<div class="rq-ilan-icon">${(PROP_PLACEHOLDER[propType]||PROP_PLACEHOLDER.default).icon}</div>`;
+          const scoreClass = score >= 80 ? 'spill-high' : score >= 60 ? 'spill-mid' : 'spill-low';
+          // Sabit gösterilecek alanlar: mülk tipi, mahalle
+          const metaParts = [
+            il.fields?.property_type,
+            il.fields?.neighborhood || il.fields?.district,
+          ].filter(Boolean).map(v => `<span class="rq-meta-tag">${v}</span>`).join('');
+          return `<div class="rq-ilan-row" onclick="openDetailModal(${il.id})">
+            ${thumb}
+            <div class="req-ilan-info">
+              <div class="rq-ilan-title">${escHtml(il.fields?.title||'—')}
+                ${il.listing_no ? `<span class="rq-ilan-no">#${il.listing_no}</span>` : ''}
+              </div>
+              <div class="rq-ilan-meta">${metaParts}</div>
+            </div>
+            <div class="rq-ilan-right">
+              <span class="req-score-pill ${scoreClass}">%${score}</span>
+              <span class="rq-price">${priceDisp}</span>
+            </div>
+          </div>`;
+        }).join('');
+
+    return `<div class="rq-card${t.is_active ? '' : ' rq-passive'}" id="talep-${t.id}">
+      <div class="rq-hdr" onclick="toggleTalepAcc(${t.id})">
+        <div class="rq-av" style="background:${c}20;color:${c}">${harf}</div>
+        <div class="rq-body">
+          <div class="rq-r1">
+            ${nameHTML}
+          </div>
+          ${notesHTML}
+          <div class="rq-tags">${tags}</div>
         </div>
-        <div class="talep-right">
-          <div class="ok-btn" id="ok-${t.id}"><span class="chevron">▾</span></div>
-          <div class="eslesme-badge${matches.length?'':' zero'}">${matches.length}</div>
-          <div class="zil-btn${t.notify_me?' active':''}" onclick="doToggleNotify(${t.id},event)">
-            🔔${t.notify_me?'<span class="zil-dot"></span>':''}
-          </div>
-          <div class="toggle-btn${t.is_active?' on':''}" onclick="doToggleRequest(${t.id},event)">
-            <span class="toggle-knob"></span>
-          </div>
-          <button class="icon-btn icon-btn-edit" onclick="openEditRequest(${t.id},event)">✏️</button>
+        <div class="rq-acts">
+          <span class="rq-match ${matchBadgeClass}">${matches.length} eşleşme</span>
+          ${t.customer_id ? `<span class="rq-link" title="Müşteri bağlı"><i class="ti ti-link" aria-hidden="true"></i></span>` : ''}
+          <button class="rq-ibt${t.notify_me?' rq-notify-on':''}" onclick="doToggleNotify(${t.id},event)" title="${t.notify_me?'Bildirimi Kapat':'Bildirim Aç'}">
+            <i class="ti ${t.notify_me ? 'ti-bell-ringing' : 'ti-bell'}" aria-hidden="true"></i>
+          </button>
+          <button class="rq-ibt" onclick="openEditRequest(${t.id},event)" title="Düzenle">
+            <i class="ti ti-edit" aria-hidden="true"></i>
+          </button>
+          ${(isOwner || API.isAdmin()) ? `
+          <button class="rq-ibt rq-danger" onclick="doDeleteRequest(${t.id},event)" title="Sil">
+            <i class="ti ti-trash" aria-hidden="true"></i>
+          </button>
+          <button class="rq-sbtn${t.is_active?' rq-active':' rq-passive'}" onclick="doToggleRequest(${t.id},event)">
+            <i class="ti ${t.is_active?'ti-player-pause':'ti-player-play'}" aria-hidden="true"></i>
+            ${t.is_active ? 'Aktif' : 'Pasif'}
+          </button>` : ''}
+          <i class="ti ti-chevron-down rq-chev" id="ok-${t.id}" aria-hidden="true"></i>
         </div>
       </div>
-      <div class="accordion-body" id="acc-${t.id}">
-        <div class="acc-title">Eşleşen İlanlar (${matches.length})</div>
-        <div class="ilan-mini-list">
-          ${!matches.length
-            ? '<div class="empty-acc">🔍 Eşleşen ilan bulunamadı.</div>'
-            : matches.map(({il,score})=>{
-                const r=scoreColor(score);
-                const cfg=state.cfg;
-                const propType=il.fields?.property_type||'Daire';
-                const cardKeys=cfg?.listing_fields?.card_fields?.[propType]||[];
-                const detailTags=cardKeys.map(k=>{
-                  const v=il.fields?.[k]; return v?`<span class="meta-tag">${v}</span>`:'';
-                }).join('');
-                const priceMin=il.fields?.price_min, priceMax=il.fields?.price_max;
-                const priceDisp=priceMin||priceMax
-                  ?(priceMin&&priceMax?`${fiyatFormat(priceMin)}–${fiyatFormat(priceMax)}`:fiyatFormat(priceMin||priceMax))
-                  :fiyatFormat(il.fields?.price);
-                const imgThumb=il.cover_image
-                  ?`<img src="${il.cover_image}" alt="" class="ilan-mini-thumb" loading="lazy">`
-                  :`<div class="ilan-mini-icon">${(PROP_PLACEHOLDER[propType]||PROP_PLACEHOLDER.default).icon}</div>`;
-                return `<div class="ilan-mini" onclick="openDetailModal(${il.id})">
-                  ${imgThumb}
-                  <div class="ilan-mini-info">
-                    <div class="ilan-mini-title">${il.fields?.title||'—'}
-                      ${il.listing_no?`<span class="mini-no">#${il.listing_no}</span>`:''}
-                    </div>
-                    <div class="ilan-mini-tags">${detailTags}</div>
-                  </div>
-                  <div class="ilan-mini-right">
-                    <span class="eslesme-pill" style="background:${r.bg};color:${r.c}">%${score}</span>
-                    <span class="ilan-mini-price">${priceDisp}</span>
-                  </div>
-                </div>`;
-              }).join('')
-          }
+      <div class="rq-acc" id="acc-${t.id}">
+        ${musteriKart}
+        <div class="rq-ilanlar">
+          <div class="rq-acc-title">Eşleşen ilanlar (${matches.length})</div>
+          ${ilanlarHTML}
         </div>
       </div>
     </div>`;
   }).join('');
 }
 
-function toggleTalepAcc(id) {
-  document.getElementById('acc-'+id).classList.toggle('open');
-  document.getElementById('ok-'+id).classList.toggle('open');
+function talepViewToggle(view, btn) {
+  document.querySelectorAll('.toolbar-toggle').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderRequests();
 }
+
+function toggleTalepAcc(id) {
+  const acc  = document.getElementById('acc-'+id);
+  const chev = document.getElementById('ok-'+id);
+  const card = document.getElementById('talep-'+id);
+  acc.classList.toggle('open');
+  if (chev) chev.classList.toggle('open');
+  if (card) card.classList.toggle('rq-open');
+}
+async function doDeleteRequest(id, e) {
+  e.stopPropagation();
+  if (!confirm('Bu talebi silmek istediğinizden emin misiniz?')) return;
+  try {
+    await API.adminDeleteRequest(id);
+    await loadRequests();
+    showToast('Talep silindi.');
+  } catch(err) { showToast(err.message, 'error'); }
+}
+
 async function doToggleNotify(id,e) {
   e.stopPropagation();
   try { await API.toggleRequestNotify(id); await loadRequests(); } catch(err) { showToast(err.message,'error'); }
@@ -1212,38 +1301,140 @@ async function openEditRequest(id,e) {
 }
 function closeTalepModal() { document.getElementById('talep-overlay').classList.remove('open'); }
 
+/* ── Müşteri Combobox (Talep Formu) ─────────────────────────── */
+let _comboboxDebounce = null;
+let _comboboxSelected = null; // {id, name, phone}
+
+function buildCustomerCombobox(name='', phone='', customerId='') {
+  return `
+  <input type="hidden" id="tf-customer_id" value="${customerId||''}">
+  <div class="form-group customer-combobox-group">
+    <label>Müşteri Adı <span class="req">*</span>
+      <span class="combobox-hint" id="combobox-linked-hint" style="display:none">
+        🔗 <a href="#" onclick="clearComboboxLink(event)">Bağlantıyı kaldır</a>
+      </span>
+    </label>
+    <div class="combobox-wrap">
+      <input id="tf-client_name" type="text" autocomplete="off" placeholder="Ad yazın veya müşteri arayın…"
+        value="${escapeAttr(name)}" oninput="onComboboxInput(this)">
+      <ul id="combobox-dropdown" class="combobox-dropdown" style="display:none"></ul>
+    </div>
+  </div>
+  <div class="form-group">
+    <label>Telefon <span class="req">*</span></label>
+    <input id="tf-phone" type="text" value="${escapeAttr(phone)}" placeholder="05xx xxx xx xx">
+  </div>`;
+}
+
+function escapeAttr(s) {
+  return (s||'').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function onComboboxInput(el) {
+  clearTimeout(_comboboxDebounce);
+  // Eğer daha önce bir müşteri seçilmişse, link'i temizle
+  if (_comboboxSelected) clearComboboxLinkState();
+  const q = el.value.trim();
+  if (q.length < 2) { hideComboboxDropdown(); return; }
+  _comboboxDebounce = setTimeout(() => searchComboboxCustomers(q), 250);
+}
+
+async function searchComboboxCustomers(q) {
+  try {
+    const customers = await API.getCustomers({q}) || [];
+    renderComboboxDropdown(customers);
+  } catch(e) { hideComboboxDropdown(); }
+}
+
+function renderComboboxDropdown(customers) {
+  const dd = document.getElementById('combobox-dropdown');
+  if (!dd) return;
+  if (!customers.length) { hideComboboxDropdown(); return; }
+  dd.innerHTML = customers.map(c => `
+    <li class="combobox-item" onclick="selectComboboxCustomer(${c.id},'${escapeAttr(c.name)}','${escapeAttr(c.phone||'')}')">
+      <span class="combobox-name">${c.name}</span>
+      ${c.phone ? `<span class="combobox-phone">${c.phone}</span>` : ''}
+    </li>`).join('');
+  dd.style.display = 'block';
+}
+
+function selectComboboxCustomer(id, name, phone) {
+  _comboboxSelected = {id, name, phone};
+  const nameEl  = document.getElementById('tf-client_name');
+  const phoneEl = document.getElementById('tf-phone');
+  const cidEl   = document.getElementById('tf-customer_id');
+  const hint    = document.getElementById('combobox-linked-hint');
+  if (nameEl)  nameEl.value  = name;
+  if (phoneEl && phone) phoneEl.value = phone;
+  if (cidEl)   cidEl.value   = id;
+  if (hint)    hint.style.display = 'inline';
+  hideComboboxDropdown();
+}
+
+function clearComboboxLink(e) {
+  e?.preventDefault();
+  clearComboboxLinkState();
+}
+
+function clearComboboxLinkState() {
+  _comboboxSelected = null;
+  const cidEl = document.getElementById('tf-customer_id');
+  const hint  = document.getElementById('combobox-linked-hint');
+  if (cidEl) cidEl.value = '';
+  if (hint)  hint.style.display = 'none';
+}
+
+function hideComboboxDropdown() {
+  const dd = document.getElementById('combobox-dropdown');
+  if (dd) dd.style.display = 'none';
+}
+
+// Dışarı tıklayınca dropdown kapansın
+document.addEventListener('click', e => {
+  if (!e.target.closest('.combobox-wrap')) hideComboboxDropdown();
+});
+
+// ── Talep formu — statik alan tanımları ─────────────────────────
+// Her mülk tipi için hangi alanların gösterileceği burada tanımlı.
+// İleride DB'ye taşınabilir ama şimdilik sade ve net.
+const TALEP_FIELDS = {
+  'Daire':  ['district','neighborhood','rooms','budget'],
+  'Arsa':   ['district','neighborhood','zoning','budget'],
+  'Villa':  ['district','neighborhood','budget'],
+  'Ticari': ['district','neighborhood','budget'],
+  // Bilinmeyen mülk tipleri için varsayılan
+  '_default': ['district','neighborhood','budget'],
+};
+
+// Alan tanımları — label, type, source
+const TALEP_FIELD_DEFS = {
+  district:     { label:'İlçe',         type:'select', source:'districts',     required:true  },
+  neighborhood: { label:'Mahalle',      type:'select', source:'neighborhoods', required:false },
+  rooms:        { label:'Oda Sayısı',   type:'select', source:'room_options',  required:false },
+  zoning:       { label:'İmar Durumu',  type:'select', source:'zoning_options',required:false },
+  budget:       { label:'Bütçe Aralığı (₺)', type:'budget', required:false },
+};
+
 function buildTalepForm(talep) {
-  const cfg    = state.cfg;
-  const commonRaw = cfg?.request_fields?.common||[];
-  const notesField = commonRaw.find(f=>f.key==='notes');
-  const common = [...commonRaw.filter(f=>f.key!=='notes'&&f.key!=='budget')];
+  const cfg      = state.cfg;
+  const propType = talep?.fields?.property_type || '';
 
-  const propType  = talep?.fields?.property_type||'';
-  const extraKeys = propType ? (cfg?.request_fields?.by_property?.[propType]||[]) : [];
-  const commonKeys = new Set(common.map(f => f.key));
-  const extraFields = extraKeys
-    .filter(k => !commonKeys.has(k))
-    .map(k => {
-      if (cfg?._allFieldsMap?.[k]) return cfg._allFieldsMap[k];
-      const inCommon = cfg?.request_fields?.common?.find(f=>f.key===k);
-      if (inCommon) return inCommon;
-      return {key:k, label:k, type:'text', required:false};
-    });
+  // ── 1. Mülk tipine göre alan listesi ────────────────────────────
+  const fieldKeys = TALEP_FIELDS[propType] || TALEP_FIELDS['_default'];
 
-  const buildInput = (f, val='') => {
-    if (f.type==='select') {
-      const opts=cfg.field_sources?.[f.source]||[];
-      return `<select id="tf-${f.key}" ${f.required?'required':''}>
-        <option value="">Seçin...</option>
-        ${opts.map(o=>`<option ${o===val?'selected':''}>${o}</option>`).join('')}
-      </select>`;
-    }
-    if (f.type==='textarea') return `<textarea id="tf-${f.key}" rows="2">${val}</textarea>`;
-    return `<input id="tf-${f.key}" type="${f.type}" value="${val}" placeholder="${f.label}" ${f.required?'required':''}>`;
+  // ── 2. Select options helper ─────────────────────────────────────
+  const buildSelect = (key, def, val) => {
+    const opts = cfg?.field_sources?.[def.source] || [];
+    return `<select id="tf-${key}" ${def.required ? 'required' : ''}>
+      <option value="">Seçin…</option>
+      ${opts.map(o => `<option ${o===val ? 'selected' : ''}>${o}</option>`).join('')}
+    </select>`;
   };
 
-  const bMin=talep?.fields?.budget_min||'', bMax=talep?.fields?.budget_max||talep?.fields?.budget||'';
-  const budgetBlock=`
+  // ── 3. Bütçe bloğu ───────────────────────────────────────────────
+  const bMin = talep?.fields?.budget_min || '';
+  const bMax = talep?.fields?.budget_max || talep?.fields?.budget || '';
+  const budgetHTML = `
     <div class="form-group">
       <label>Bütçe Aralığı (₺)</label>
       <div class="price-range-row">
@@ -1257,62 +1448,140 @@ function buildTalepForm(talep) {
       </div>
     </div>`;
 
-  const html = [...common, ...extraFields].map(f=>{
-    const val=talep?.fields?.[f.key]||'';
+  // ── 4. Alanları render et ────────────────────────────────────────
+  const fieldsHTML = fieldKeys.map(key => {
+    if (key === 'budget') return budgetHTML;
+    const def = TALEP_FIELD_DEFS[key];
+    if (!def) return '';
+    const val = talep?.fields?.[key] || '';
+    const input = def.type === 'select'
+      ? buildSelect(key, def, val)
+      : `<input id="tf-${key}" type="text" value="${val}" placeholder="${def.label}" ${def.required ? 'required' : ''}>`;
     return `<div class="form-group">
-      <label>${f.label}${f.required?' <span class="req">*</span>':''}</label>
-      ${buildInput(f,val)}
+      <label>${def.label}${def.required ? ' <span class="req">*</span>' : ''}</label>
+      ${input}
     </div>`;
   }).join('');
 
-  const notesHTML = notesField ? `<div class="form-group">
-    <label>${notesField.label}</label>
-    <textarea id="tf-notes" rows="2">${talep?.fields?.notes||''}</textarea>
-  </div>` : '';
+  // ── 5. Notlar ────────────────────────────────────────────────────
+  const notesHTML = `
+    <div class="form-group">
+      <label>Notlar</label>
+      <textarea id="tf-notes" rows="2">${talep?.fields?.notes || ''}</textarea>
+    </div>`;
 
+  // ── 6. Mülk tipi seçimi — her zaman ilk alan ────────────────────
+  const propTypes = cfg?.property_types || ['Daire','Villa','Arsa','Ticari'];
+  const propTypeHTML = `
+    <div class="form-group">
+      <label>Mülk Tipi <span class="req">*</span></label>
+      <select id="tf-property_type" required>
+        <option value="">Seçin…</option>
+        ${propTypes.map(p => `<option ${p===propType ? 'selected' : ''}>${p}</option>`).join('')}
+      </select>
+    </div>`;
+
+  // ── 7. Combobox (müşteri) — en üstte ────────────────────────────
+  _comboboxSelected = null;
+  const comboboxBlock = buildCustomerCombobox(
+    talep?.fields?.client_name || '',
+    talep?.fields?.phone || '',
+    talep?.fields?.customer_id || ''
+  );
+  const hasCid = !!(talep?.fields?.customer_id);
+
+  // ── 8. DOM'a yaz ─────────────────────────────────────────────────
   document.getElementById('talep-form-body').innerHTML =
-    html + budgetBlock + notesHTML +
+    comboboxBlock +
+    propTypeHTML +
+    fieldsHTML +
+    notesHTML +
     `<div class="form-group">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-        <input type="checkbox" id="tf-notify" ${talep?.notify_me?'checked':''}>
+        <input type="checkbox" id="tf-notify" ${talep?.notify_me ? 'checked' : ''}>
         Yeni eşleşmelerde bildir
       </label>
     </div>`;
 
+  // ── 9. Mülk tipi değişince formu yeniden oluştur ─────────────────
   document.getElementById('tf-property_type')?.addEventListener('change', function() {
+    const cid = document.getElementById('tf-customer_id')?.value || '';
     const currentVals = {};
-    document.querySelectorAll('#talep-form-body [id^="tf-"]').forEach(el=>{
-      currentVals[el.id.replace('tf-','')]=el.type==='checkbox'?el.checked:el.value;
+    document.querySelectorAll('#talep-form-body [id^="tf-"]').forEach(el => {
+      currentVals[el.id.replace('tf-', '')] = el.type === 'checkbox' ? el.checked : el.value;
     });
-    const newTalep = { ...talep, fields: { ...talep?.fields, ...currentVals, property_type: this.value }, notify_me: document.getElementById('tf-notify')?.checked };
-    buildTalepForm(newTalep);
-    const pt = document.getElementById('tf-property_type');
-    if(pt) pt.value = this.value;
+    buildTalepForm({
+      ...talep,
+      fields: { ...talep?.fields, ...currentVals, property_type: this.value, customer_id: cid },
+      notify_me: document.getElementById('tf-notify')?.checked
+    });
   });
+
+  if (hasCid) {
+    const hint = document.getElementById('combobox-linked-hint');
+    if (hint) hint.style.display = 'inline';
+  }
 }
 
 document.getElementById('talep-kaydet-btn').addEventListener('click', async ()=>{
-  const cfg=state.cfg;
-  const fields={};
-  const commonRaw=cfg?.request_fields?.common||[];
-  const propType=document.getElementById('tf-property_type')?.value||'';
-  const extraKeys=propType?(cfg?.request_fields?.by_property?.[propType]||[]):[];
-  const extraFields=extraKeys.map(k=>cfg?.listing_fields?.all_fields?.find(f=>f.key===k)).filter(Boolean);
-  [...commonRaw.filter(f=>f.key!=='budget'), ...extraFields].forEach(f=>{
-    const el=document.getElementById('tf-'+f.key); if(el) fields[f.key]=el.value;
+  const fields = {};
+
+  // Sabit alanlar
+  fields.property_type = document.getElementById('tf-property_type')?.value||'';
+  fields.client_name   = document.getElementById('tf-client_name')?.value?.trim()||'';
+  fields.phone         = document.getElementById('tf-phone')?.value?.trim()||'';
+  fields.notes         = document.getElementById('tf-notes')?.value||'';
+  fields.budget_min    = getRawPrice('tf-budget_min');
+  fields.budget_max    = getRawPrice('tf-budget_max');
+  fields.budget        = fields.budget_max || fields.budget_min;
+
+  // Mülk tipine göre değişen alanlar — TALEP_FIELDS'dan oku
+  const fieldKeys = TALEP_FIELDS[fields.property_type] || TALEP_FIELDS['_default'];
+  fieldKeys.forEach(key => {
+    if (key === 'budget') return; // yukarıda halledildi
+    const el = document.getElementById('tf-' + key);
+    if (el) fields[key] = el.value;
   });
-  fields.budget_min=getRawPrice('tf-budget_min');
-  fields.budget_max=getRawPrice('tf-budget_max');
-  fields.budget=fields.budget_max||fields.budget_min;
-  fields.notes=document.getElementById('tf-notes')?.value||'';
+
+  const customerId = document.getElementById('tf-customer_id')?.value||'';
+  if (customerId) fields.customer_id = customerId;
 
   if(!fields.client_name){showToast('Müşteri adı zorunludur','error');return;}
   if(!fields.phone){showToast('Telefon zorunludur','error');return;}
   const notify=document.getElementById('tf-notify')?.checked||false;
   try {
+    // Müşteri combobox'tan seçilmemişse (el ile yazıldıysa) → otomatik müşteri oluştur/bul
+    if (!fields.customer_id) {
+      try {
+        // Önce aynı isim+telefon var mı kontrol et
+        const existing = await API.getCustomers({q: fields.client_name}) || [];
+        const match = existing.find(c =>
+          c.name.toLowerCase() === fields.client_name.toLowerCase() &&
+          (c.phone||'').replace(/\s/g,'') === (fields.phone||'').replace(/\s/g,'')
+        );
+        if (match) {
+          fields.customer_id = String(match.id);
+        } else {
+          // Yeni müşteri oluştur
+          const newC = await API.createCustomer({
+            name:  fields.client_name,
+            phone: fields.phone,
+          });
+          if (newC?.id) {
+            fields.customer_id = String(newC.id);
+            showToast('👤 Müşteri otomatik oluşturuldu', 'info');
+          }
+        }
+      } catch(cerr) {
+        // Müşteri oluşturma başarısız olsa bile talebi kaydet
+        console.warn('Otomatik müşteri oluşturma başarısız:', cerr);
+      }
+    }
     if(state.editRequestId){await API.updateRequest(state.editRequestId,{fields,notify_me:notify});showToast('✅ Talep güncellendi!');}
     else{await API.createRequest({fields,notify_me:notify});showToast('🎉 Talep eklendi!');}
     closeTalepModal(); await loadRequests();
+    // Müşteri listesi açıksa yenile
+    if (document.getElementById('page-musteriler')?.classList.contains('active')) loadCustomers();
   } catch(e){showToast(e.message,'error');}
 });
 
@@ -1703,7 +1972,7 @@ state.taskParentId = null;
 
 const PRIORITY_LABEL = { dusuk:'Düşük', normal:'Normal', yuksek:'Yüksek', acil:'Acil' };
 const PRIORITY_CLASS = { dusuk:'prio-dusuk', normal:'prio-normal', yuksek:'prio-yuksek', acil:'prio-acil' };
-const STATUS_TASK_LABEL = { bekliyor:'Bekliyor', devam_ediyor:'Devam Ediyor', tamamlandi:'Tamamlandı', iptal:'İptal' };
+const STATUS_TASK_LABEL = { bekliyor:'Başladı', devam_ediyor:'Devam Ediyor', tamamlandi:'Tamamlandı', iptal:'İptal' };
 const STATUS_TASK_CLASS = { bekliyor:'status-bekliyor', devam_ediyor:'status-devam', tamamlandi:'status-tamamlandi', iptal:'status-iptal' };
 
 async function loadTasks() {
@@ -1835,7 +2104,13 @@ function onDragOver(e) {
   e.dataTransfer.dropEffect = 'move';
   e.currentTarget.closest('.kanban-col').classList.add('drag-over');
 }
-function onDragLeave(e) { e.currentTarget.closest('.kanban-col')?.classList.remove('drag-over'); }
+function onDragLeave(e) {
+  const col = e.currentTarget.closest('.kanban-col');
+  if (!col) return;
+  // Sürüklenen eleman kolonun içine gidiyorsa kaldırma
+  if (col.contains(e.relatedTarget)) return;
+  col.classList.remove('drag-over');
+}
 async function onDrop(e) {
   e.preventDefault();
   const col = e.currentTarget.closest('.kanban-col');
@@ -2336,8 +2611,8 @@ function renderAdminFields(allFields) {
 
   const cfg = state.cfg;
   const propTypes = cfg?.property_types || ['Daire','Villa','Arsa','Ticari'];
-  const contexts  = ['form','card','detail','telegram'];
-  const ctxLabels = {form:'Yeni İlan', card:'Kart', detail:'Detay', telegram:'Telegram'};
+  const contexts  = ['form','card','detail','telegram','talep'];
+  const ctxLabels = {form:'Yeni İlan', card:'Kart', detail:'Detay', telegram:'Telegram', talep:'Talep'};
 
   // BÖLÜM 1 — Alan listesi
   let html = '<div class="fields-toolbar">' +
@@ -2444,7 +2719,7 @@ function editField(key) {
 async function saveAdminFields() {
   const cfg = state.cfg;
   const propTypes = cfg?.property_types || ['Daire','Villa','Arsa','Ticari'];
-  const contexts  = ['form','card','detail'];
+  const contexts  = ['form','card','detail','talep'];
 
   // Sıralama — af-list'teki sıraya göre
   const orderedKeys = [...document.querySelectorAll('#af-list .af-row')].map(r => r.dataset.key);
@@ -2455,7 +2730,7 @@ async function saveAdminFields() {
   allFields.forEach(f => {
     fieldMap[f.key] = {
       ...f,
-      show_on: { form:[], card:[], detail:[], telegram:[] }
+      show_on: { form:[], card:[], detail:[], telegram:[], talep:[] }
     };
   });
 
@@ -2640,8 +2915,35 @@ function renderAdminSettings(s) {
   const cont = document.getElementById('admin-settings-content');
   if (!cont) return;
 
-  const channelsHTML  = buildChannelsHTML(s.listing_channels||[]);
-  const autoTasksHTML = buildAutoTasksHTML(s.auto_task_templates||[]);
+  const channelsHTML   = buildChannelsHTML(s.listing_channels||[]);
+  const autoTasksHTML  = buildAutoTasksHTML(s.auto_task_templates||[]);
+  const ds = s.daily_summary || {};
+  const summaryHTML = `
+    <div class="setting-group">
+      <div class="setting-group-header">
+        <span class="setting-group-title">📅 Günlük Telegram Özeti</span>
+      </div>
+      <div class="setting-row">
+        <label class="setting-label">
+          <input type="checkbox" id="ds-enabled" ${ds.enabled ? 'checked' : ''}>
+          Günlük özet aktif
+        </label>
+      </div>
+      <div class="setting-row">
+        <label class="setting-label">Gönderim saati</label>
+        <select id="ds-hour" style="width:100px">
+          ${[6,7,8,9,10,11,12].map(h =>
+            `<option value="${h}" ${(ds.hour||9)===h?'selected':''}>${h.toString().padStart(2,'0')}:00</option>`
+          ).join('')}
+        </select>
+      </div>
+      <div class="setting-row">
+        <label class="setting-label">
+          <input type="checkbox" id="ds-sunday" ${ds.send_sunday ? 'checked' : ''}>
+          Pazar günü de gönder
+        </label>
+      </div>
+    </div>`;
 
   cont.innerHTML = `
     <div class="settings-grid">
@@ -2652,6 +2954,7 @@ function renderAdminSettings(s) {
         ${autoTasksHTML}
       </div>
     </div>
+    ${summaryHTML}
     <div class="settings-footer">
       <button class="btn btn-gold" onclick="saveAdminSettings()">Ayarları Kaydet</button>
     </div>`;
@@ -2855,33 +3158,51 @@ async function saveAdminSettings() {
     zoning_options:  getSettingList('zoning_options'),
   };
 
-  const allRequestFields = [
-    {key:'listing_type', label:'Satılık/Kiralık', type:'select', required:true, source:'listing_types'},
-    {key:'property_type', label:'Mülk Tipi', type:'select', required:true, source:'property_types'},
-    {key:'district', label:'İlçe Tercihi', type:'select', required:true, source:'districts'},
-    {key:'budget', label:'Bütçe', type:'number', required:true},
-    {key:'notes', label:'Notlar', type:'textarea', required:false},
-  ];
+  // request_common: sabit sistem alanları + admin alan listesinde "Talep" işaretli olanlar
+  // "Talep" checkbox'ı işaretli alanları af-list'teki sıraya göre al
   const baseFields = [
     {key:'client_name', label:'Müşteri Adı', type:'text', required:true},
     {key:'phone', label:'Telefon', type:'text', required:true},
   ];
-  const activeCommon = allRequestFields.filter(f =>
-    document.getElementById('rtoggle-'+f.key)?.classList.contains('on')
-  );
-  payload.request_common = [...baseFields, ...activeCommon];
+  const allFieldsCurrent = state.cfg?.listing_fields?.all_fields || [];
+  const fieldDefMap = {};
+  allFieldsCurrent.forEach(f => { fieldDefMap[f.key] = f; });
 
+  // af-list sırasına göre "talep" işaretli alanları topla
+  const talepFields = [];
+  document.querySelectorAll('#af-list .af-row').forEach(row => {
+    const key = row.dataset.key;
+    const cb  = row.querySelector('.af-meta-cb[data-meta="talep"]');
+    if (cb && cb.checked && fieldDefMap[key]) {
+      const f = fieldDefMap[key];
+      talepFields.push({
+        key:      f.key,
+        label:    f.label,
+        type:     f.type,
+        required: f.required || false,
+        ...(f.source ? {source: f.source} : {}),
+      });
+    }
+  });
+  payload.request_common = [...baseFields, ...talepFields];
+
+  // request_by_property — alan yönetimi tablosundaki show_on.talep checkboxlarından oku
   const byPropNew = {};
   (payload.property_types||[]).forEach(pt => {
     const active = [];
-    document.querySelectorAll(`[id^="byprop-${pt}-"]`).forEach(btn => {
-      if (btn.classList.contains('on')) {
-        active.push(btn.id.replace(`byprop-${pt}-`, ''));
-      }
+    document.querySelectorAll(`.field-cb[data-ctx="talep"][data-combo="${CSS.escape(pt)}"]`).forEach(cb => {
+      if (cb.checked) active.push(cb.dataset.field);
     });
     byPropNew[pt] = active;
   });
   payload.request_by_property = byPropNew;
+
+  // Günlük özet ayarları
+  payload.daily_summary = {
+    enabled:     document.getElementById('ds-enabled')?.checked || false,
+    hour:        parseInt(document.getElementById('ds-hour')?.value || '9'),
+    send_sunday: document.getElementById('ds-sunday')?.checked || false,
+  };
   payload.all_fields = state.cfg?.listing_fields?.all_fields || [];
 
   // Ozel listeler

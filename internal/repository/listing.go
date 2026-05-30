@@ -152,11 +152,15 @@ func (r *ListingRepository) GetByShareToken(token string) (*model.Listing, error
 func (r *ListingRepository) Create(l *model.Listing) error {
 	fieldsJSON, err := json.Marshal(l.Fields)
 	if err != nil { return err }
+	// CustomerID=0 → NULL (FK ihlalini önler)
+	var customerID interface{}
+	if l.CustomerID > 0 { customerID = l.CustomerID }
+
 	return r.db.QueryRow(`
 		INSERT INTO listings (user_id, cover_image, fields, customer_id)
 		VALUES ($1,$2,$3,$4)
 		RETURNING id, listing_no, share_token, is_listed, status, created_at, updated_at`,
-		l.UserID, l.CoverImage, fieldsJSON, l.CustomerID,
+		l.UserID, l.CoverImage, fieldsJSON, customerID,
 	).Scan(&l.ID, &l.ListingNo, &l.ShareToken, &l.IsListed, &l.Status, &l.CreatedAt, &l.UpdatedAt)
 }
 

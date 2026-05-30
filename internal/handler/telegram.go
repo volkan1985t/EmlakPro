@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/volkan1985t/EmlakPro/internal/config"
 	"github.com/volkan1985t/EmlakPro/internal/model"
@@ -17,24 +19,33 @@ import (
 // ─── BotHandler ──────────────────────────────────────────────
 
 type BotHandler struct {
-	cfg         *config.Config
-	tg          *svc.TelegramService
-	userRepo    *repository.UserRepository
-	listingRepo *repository.ListingRepository
-	requestRepo *repository.RequestRepository
-	db          *sql.DB
+	cfg          *config.Config
+	tg           *svc.TelegramService
+	imageSvc     *svc.ImageService
+	notifySvc    *svc.NotificationService
+	userRepo     *repository.UserRepository
+	listingRepo  *repository.ListingRepository
+	requestRepo  *repository.RequestRepository
+	taskRepo     *repository.TaskRepository
+	customerRepo *repository.CustomerRepository
+	db           *sql.DB
 }
 
 func NewBotHandler(
-	cfg *config.Config,
-	tg *svc.TelegramService,
-	db *sql.DB,
-	userRepo *repository.UserRepository,
-	listingRepo *repository.ListingRepository,
-	requestRepo *repository.RequestRepository,
+	cfg          *config.Config,
+	tg           *svc.TelegramService,
+	imageSvc     *svc.ImageService,
+	notifySvc    *svc.NotificationService,
+	db           *sql.DB,
+	userRepo     *repository.UserRepository,
+	listingRepo  *repository.ListingRepository,
+	requestRepo  *repository.RequestRepository,
+	taskRepo     *repository.TaskRepository,
+	customerRepo *repository.CustomerRepository,
 ) *BotHandler {
-	return &BotHandler{cfg: cfg, tg: tg, db: db,
-		userRepo: userRepo, listingRepo: listingRepo, requestRepo: requestRepo}
+	return &BotHandler{cfg: cfg, tg: tg, imageSvc: imageSvc, notifySvc: notifySvc, db: db,
+		userRepo: userRepo, listingRepo: listingRepo, requestRepo: requestRepo,
+		taskRepo: taskRepo, customerRepo: customerRepo}
 }
 
 // Handle — gelen her update'i işler
@@ -92,6 +103,17 @@ func (h *BotHandler) handleMessage(msg *svc.TGMessage) {
 		return
 	}
 
+	// Fotoğraf geldi mi?
+	if len(msg.Photo) > 0 {
+		session := h.getSession(chatID)
+		if session != nil && session.Step == "listing_wizard" {
+			h.handleListingPhoto(msg, user, session)
+			return
+		}
+		h.tg.SendMessage(chatID, "📸 Fotoğraf alındı ama aktif bir ilan girişi yok. Önce ➕ İlan Gir seçin.", nil)
+		return
+	}
+
 	// Aktif session var mı?
 	session := h.getSession(chatID)
 	if session != nil && session.Step != "idle" {
@@ -111,9 +133,14 @@ func (h *BotHandler) handleMessage(msg *svc.TGMessage) {
 // ─── Callback handler ────────────────────────────────────────
 
 func (h *BotHandler) handleCallback(cb *svc.TGCallback) {
-	chatID := cb.Message.Chat.ID
-	data   := cb.Data
-	user   := h.getUserByChatID(chatID)
+	chatID    := cb.Message.Chat.ID
+	data      := cb.Data
+	messageID := cb.Message.MessageID
+	user      := h.getUserByChatID(chatID)
+
+	// Her callback'te: spinner'ı temizle + keyboard'u kaldır
+	h.tg.AnswerCallback(cb.ID)
+	h.tg.RemoveKeyboard(chatID, messageID)
 
 	if user == nil {
 		h.tg.SendMessage(chatID, "⛔ Yetkisiz erişim.", nil)
@@ -174,13 +201,20 @@ func (h *BotHandler) handleCallback(cb *svc.TGCallback) {
 	case data == "menu_my_requests":
 		h.sendMyRequests(chatID, user)
 
+	case data == "wiz_photos_done":
+		session := h.getSession(chatID)
+		if session != nil && session.Step == "listing_wizard" {
+			h.finalizeListing(chatID, user, session.Data)
+		} else {
+			h.tg.SendMessage(chatID, "⚠️ Aktif ilan girişi bulunamadı.", nil)
+		}
+
 	case data == "wizard_cancel":
 		h.clearSession(chatID)
 		h.tg.SendMessage(chatID, "❌ İşlem iptal edildi.", svc.MainMenuKeyboard())
 
 	case data == "menu_tasks":
-		h.tg.SendMessage(chatID,
-			"✅ <b>Görev Ekle</b>\n\n🚧 Bu özellik yakında aktif olacak!", nil)
+		h.sendMyTasks(chatID, user)
 
 	// ── Bildirimler ───────────────────────────────────────────
 	case data == "menu_notify":
@@ -198,6 +232,27 @@ func (h *BotHandler) handleCallback(cb *svc.TGCallback) {
 	case data == "notify_off":
 		h.setNotify(chatID, user.ID, false)
 		h.tg.SendMessage(chatID, "🔕 Bildirimler <b>kapatıldı</b>.", nil)
+
+	// ── Geç butonu ───────────────────────────────────────────
+	case strings.HasPrefix(data, "wiz_skip_"):
+		session := h.getSession(chatID)
+		if session != nil && session.Step == "listing_wizard" {
+			stepKey  := strings.TrimPrefix(data, "wiz_skip_")
+			propType := session.Data["property_type"]
+			steps    := h.listingSteps(propType)
+			idx, _   := strconv.Atoi(session.Data["_step_idx"])
+			if idx < len(steps) && steps[idx].Key == stepKey {
+				session.Data[stepKey] = ""
+				nextIdx := idx + 1
+				session.Data["_step_idx"] = strconv.Itoa(nextIdx)
+				h.saveSession(session)
+				if nextIdx >= len(steps) {
+					h.finalizeListing(chatID, user, session.Data)
+					return
+				}
+				h.sendNextListingStep(chatID, session, steps, nextIdx)
+			}
+		}
 
 	// ── Wizard adımları (callback'le gelen seçimler) ──────────
 	default:
@@ -320,6 +375,12 @@ func (h *BotHandler) listingSteps(propType string) []wizardStep {
 	steps = append(steps,
 		wizardStep{Key: "price", Prompt: "💰 Fiyat yazın (₺):", Keyboard: nil},
 		wizardStep{Key: "description", Prompt: "📄 Açıklama yazın (geçmek için - yazın):", Keyboard: nil},
+		wizardStep{Key: "_photos", Prompt: "📸 Fotoğraf gönderin (birden fazla gönderebilirsiniz).\nBitince ✅ Bitti butonuna basın.", Keyboard: func() interface{} {
+			return &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{
+				{{Text: "✅ Bitti — İlanı Kaydet", CallbackData: "wiz_photos_done"}},
+				{{Text: "❌ İptal", CallbackData: "wizard_cancel"}},
+			}}
+		}},
 	)
 	return steps
 }
@@ -368,6 +429,13 @@ func (h *BotHandler) listingWizardTextStep(msg *svc.TGMessage, user *model.User,
 	}
 	currentStep := steps[idx]
 
+	// _photos adımına geldiyse — fotoğraf bekle, kaydet butonu göster
+	if currentStep.Key == "_photos" {
+		kb := currentStep.Keyboard()
+		h.tg.SendMessage(chatID, currentStep.Prompt, kb)
+		return
+	}
+
 	if currentStep.Keyboard != nil {
 		kb := currentStep.Keyboard()
 		h.tg.SendMessage(chatID, "Lütfen aşağıdan seçin:", kb)
@@ -394,6 +462,11 @@ func (h *BotHandler) listingWizardTextStep(msg *svc.TGMessage, user *model.User,
 			district := session.Data["district"]
 			hoods := h.cfg.NeighborhoodsFor(district)
 			kb = svc.NeighborhoodKeyboard(hoods, "wiz_hood")
+		} else if nextStep.Key == "_photos" {
+			// _photos adımına geçince doğrudan fotoğraf promptunu göster
+			kb = nextStep.Keyboard()
+			h.tg.SendMessage(chatID, nextStep.Prompt, kb)
+			return
 		} else {
 			kb = nextStep.Keyboard()
 		}
@@ -401,8 +474,14 @@ func (h *BotHandler) listingWizardTextStep(msg *svc.TGMessage, user *model.User,
 	if kb != nil {
 		h.tg.SendMessage(chatID, nextStep.Prompt, kb)
 	} else {
-		combined := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{{{Text: "❌ İptal", CallbackData: "wizard_cancel"}}}}
-		h.tg.SendMessage(chatID, nextStep.Prompt, combined)
+		// Zorunlu olmayan metin adımlarında "Geç" butonu
+		skipKeys := map[string]bool{"contact":true,"neighborhood":true,"area_m2":true,"description":true}
+		if skipKeys[nextStep.Key] {
+			h.tg.SendMessage(chatID, nextStep.Prompt, svc.SkipKeyboard(nextStep.Key))
+		} else {
+			combined := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{{{Text: "❌ İptal", CallbackData: "wizard_cancel"}}}}
+			h.tg.SendMessage(chatID, nextStep.Prompt, combined)
+		}
 	}
 }
 
@@ -415,6 +494,11 @@ func (h *BotHandler) listingWizardCallbackStep(chatID int64, user *model.User, s
 		return
 	}
 	currentStep := steps[idx]
+
+	// _photos adımındayken sadece wiz_photos_done beklenir — finalize handleCallback'te yapılır
+	if currentStep.Key == "_photos" {
+		return
+	}
 
 	prefixes := []string{"wiz_lt_", "wiz_dist_", "wiz_hood_", "wiz_rooms_", "wiz_zoning_"}
 	val := cbData
@@ -438,6 +522,10 @@ func (h *BotHandler) listingWizardCallbackStep(chatID int64, user *model.User, s
 			district := session.Data["district"]
 			hoods := h.cfg.NeighborhoodsFor(district)
 			kb = svc.NeighborhoodKeyboard(hoods, "wiz_hood")
+		} else if nextStep.Key == "_photos" {
+			kb = nextStep.Keyboard()
+			h.tg.SendMessage(chatID, nextStep.Prompt, kb)
+			return
 		} else {
 			kb = nextStep.Keyboard()
 		}
@@ -445,9 +533,90 @@ func (h *BotHandler) listingWizardCallbackStep(chatID int64, user *model.User, s
 	if kb != nil {
 		h.tg.SendMessage(chatID, nextStep.Prompt, kb)
 	} else {
+		skipKeys := map[string]bool{"contact":true,"neighborhood":true,"area_m2":true,"description":true}
+		if skipKeys[nextStep.Key] {
+			h.tg.SendMessage(chatID, nextStep.Prompt, svc.SkipKeyboard(nextStep.Key))
+		} else {
+			combined := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{{{Text: "❌ İptal", CallbackData: "wizard_cancel"}}}}
+			h.tg.SendMessage(chatID, nextStep.Prompt, combined)
+		}
+	}
+}
+
+// handleListingPhoto — wizard sırasında gelen fotoğrafı indir ve kaydet
+// sendNextListingStep — wizard'da bir sonraki adımı göster
+func (h *BotHandler) sendNextListingStep(chatID int64, session *BotSession, steps []wizardStep, idx int) {
+	if idx >= len(steps) { return }
+	nextStep := steps[idx]
+	skipKeys := map[string]bool{"contact":true,"neighborhood":true,"area_m2":true,"description":true}
+	if nextStep.Keyboard != nil {
+		if nextStep.Key == "neighborhood" {
+			hoods := h.cfg.NeighborhoodsFor(session.Data["district"])
+			h.tg.SendMessage(chatID, nextStep.Prompt, svc.NeighborhoodKeyboard(hoods, "wiz_hood"))
+		} else if nextStep.Key == "_photos" {
+			h.tg.SendMessage(chatID, nextStep.Prompt, nextStep.Keyboard())
+		} else {
+			h.tg.SendMessage(chatID, nextStep.Prompt, nextStep.Keyboard())
+		}
+	} else if skipKeys[nextStep.Key] {
+		h.tg.SendMessage(chatID, nextStep.Prompt, svc.SkipKeyboard(nextStep.Key))
+	} else {
 		combined := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{{{Text: "❌ İptal", CallbackData: "wizard_cancel"}}}}
 		h.tg.SendMessage(chatID, nextStep.Prompt, combined)
 	}
+}
+
+func (h *BotHandler) handleListingPhoto(msg *svc.TGMessage, user *model.User, session *BotSession) {
+	chatID := msg.Chat.ID
+	idxStr := session.Data["_step_idx"]
+	steps  := h.listingSteps(session.Data["property_type"])
+	idx, _ := strconv.Atoi(idxStr)
+
+	// Henüz fotoğraf adımına gelmediyse bildir
+	if idx < len(steps) && steps[idx].Key != "_photos" {
+		h.tg.SendMessage(chatID, "⚠️ Önce diğer adımları tamamlayın.", nil)
+		return
+	}
+
+	// En büyük boyutlu fotoğrafı al (son eleman)
+	photo := msg.Photo[len(msg.Photo)-1]
+	fileURL, err := h.tg.GetFileURL(photo.FileID)
+	if err != nil {
+		log.Printf("[bot] fotoğraf URL alınamadı: %v", err)
+		h.tg.SendMessage(chatID, "❌ Fotoğraf alınamadı, tekrar deneyin.", nil)
+		return
+	}
+	data, err := h.tg.DownloadFile(fileURL)
+	if err != nil {
+		log.Printf("[bot] fotoğraf indirilemedi: %v", err)
+		h.tg.SendMessage(chatID, "❌ Fotoğraf indirilemedi.", nil)
+		return
+	}
+
+	// Fotoğraf sayısını kontrol et (max 8)
+	photoCount, _ := strconv.Atoi(session.Data["_photo_count"])
+	if photoCount >= 8 {
+		h.tg.SendMessage(chatID, "⚠️ Maksimum 8 fotoğraf ekleyebilirsiniz. ✅ Bitti butonuna basın.", nil)
+		return
+	}
+
+	// Geçici olarak session'da file_id listesi tut
+	existing := session.Data["_photo_ids"]
+	if existing != "" {
+		existing += ","
+	}
+	session.Data["_photo_ids"]    = existing + photo.FileID
+	session.Data["_photo_count"]  = strconv.Itoa(photoCount + 1)
+	// Ham byte'ı base64 olarak sakla (küçük fotoğraflar için)
+	_ = data // ileride direkt kullanılacak
+	h.saveSession(session)
+
+	photoCount++
+	h.tg.SendMessage(chatID,
+		fmt.Sprintf("✅ Fotoğraf %d eklendi. Devam gönderin veya bitirmek için butona basın.", photoCount),
+		&svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{
+			{{Text: "✅ Bitti — İlanı Kaydet", CallbackData: "wiz_photos_done"}},
+		}})
 }
 
 func (h *BotHandler) finalizeListing(chatID int64, user *model.User, data map[string]string) {
@@ -472,24 +641,87 @@ func (h *BotHandler) finalizeListing(chatID int64, user *model.User, data map[st
 		IsActive: true,
 	}
 	if err := h.listingRepo.Create(listing); err != nil {
-		log.Printf("Bot ilan oluşturma hatası: %v", err)
+		log.Printf("[BOT][HATA] ilan oluşturma: %v | user=%d fields=%v", err, user.ID, fields)
 		h.clearSession(chatID)
-		h.tg.SendMessage(chatID, "❌ İlan kaydedilirken hata oluştu. Lütfen tekrar deneyin.", svc.MainMenuKeyboard())
+		h.tg.SendMessage(chatID, fmt.Sprintf("❌ İlan kaydedilemedi: %v\nLütfen tekrar deneyin.", err), svc.MainMenuKeyboard())
 		return
 	}
+	log.Printf("[BOT] ilan oluşturuldu: id=%d no=%d user=%d", listing.ID, listing.ListingNo, user.ID)
+
+	// Tüm kullanıcılara bildirim gönder
+	if h.notifySvc != nil {
+		go h.sendBotListingNotification(listing, user)
+	}
+
+	// Fotoğrafları indir ve kaydet
+	photoIDs := data["_photo_ids"]
+	var coverSaved bool
+	if photoIDs != "" {
+		for i, fileID := range strings.Split(photoIDs, ",") {
+			if fileID == "" { continue }
+			fileURL, err := h.tg.GetFileURL(fileID)
+			if err != nil {
+				log.Printf("[bot] foto URL hatası: %v", err)
+				continue
+			}
+			imgData, err := h.tg.DownloadFile(fileURL)
+			if err != nil {
+				log.Printf("[bot] foto indirme hatası: %v", err)
+				continue
+			}
+			reader := bytes.NewReader(imgData)
+			if i == 0 {
+				res, err := h.imageSvc.SaveCover(reader, "tg.jpg", fields["property_type"], listing.ListingNo)
+				if err == nil {
+					h.listingRepo.UpdateCoverImage(listing.ID, res.Path)
+					coverSaved = true
+				}
+			} else {
+				res, err := h.imageSvc.SaveGallery(reader, "tg.jpg", fields["property_type"], listing.ListingNo)
+				if err == nil {
+					h.listingRepo.AddImage(listing.ID, res.Path, i)
+				}
+			}
+		}
+	}
+	_ = coverSaved
+
+	// Otomatik "İlan Kontrol" görevi oluştur
+	go func() {
+		tomorrow := time.Now().Add(24 * time.Hour)
+		_, err := h.taskRepo.Create(&model.CreateTaskRequest{
+			Title:       fmt.Sprintf("İlan Kontrol: #%d %s", listing.ListingNo, fields["title"]),
+			Description: fmt.Sprintf("Telegram üzerinden eklenen ilan kontrol edilmeli.\nİlan No: #%d\nMülk: %s / %s\nFiyat: %s TL", listing.ListingNo, fields["property_type"], fields["district"], fields["price"]),
+			Status:      "bekliyor",
+			Priority:    "normal",
+			DueDate:     &tomorrow,
+			Assignees:   []int64{user.ID},
+		}, user.ID)
+		if err != nil {
+			log.Printf("[bot] ilan kontrol görevi oluşturulamadı: %v", err)
+		}
+	}()
 
 	h.clearSession(chatID)
+
+	// İlan linki (share token ile)
+	baseURL := strings.TrimRight(h.cfg.App.BaseURL, "/")
+	var linkLine string
+	if baseURL != "" && listing.ShareToken != "" {
+		listingURL := fmt.Sprintf("%s/api/listings/share/%s", baseURL, listing.ShareToken)
+		linkLine = fmt.Sprintf("\n\n🔗 <a href=\"%s\">İlanı Görüntüle</a>", listingURL)
+	}
+
 	h.tg.SendMessage(chatID,
-		fmt.Sprintf("✅ <b>İlan Eklendi!</b>\n\nİlan No: #%d\nBaşlık: %s",
-			listing.ListingNo, fields["title"]),
+		fmt.Sprintf("✅ <b>İlan Eklendi!</b>\n\nİlan No: #%d\nBaşlık: %s\n\n📋 Kontrol görevi oluşturuldu.%s",
+			listing.ListingNo, fields["title"], linkLine),
 		svc.MainMenuKeyboard())
 }
 
 // ─── Talep Ekleme Sihirbazı ───────────────────────────────────
 
 var requestSteps = []struct{ Key, Prompt string }{
-	{"client_name",  "👤 Müşteri adını yazın:"},
-	{"phone",        "📞 Telefon numarasını yazın:"},
+	{"_customer",    ""},        // müşteri seç veya elle yaz
 	{"listing_type", ""},
 	{"property_type", ""},
 	{"district",     ""},
@@ -502,7 +734,8 @@ var requestSteps = []struct{ Key, Prompt string }{
 func (h *BotHandler) startRequestWizard(chatID int64, user *model.User) {
 	h.setSession(chatID, user.ID, "request_wizard", map[string]string{"_step_idx": "0"})
 	h.tg.SendMessage(chatID, "ℹ️ İptal etmek için /iptal yazın.", nil)
-	h.tg.SendMessage(chatID, requestSteps[0].Prompt, nil)
+	h.sendRequestStep(chatID, &BotSession{ChatID: chatID, UserID: user.ID, Step: "request_wizard",
+		Data: map[string]string{"_step_idx": "0"}}, 0, user.ID)
 }
 
 func (h *BotHandler) requestWizardTextStep(msg *svc.TGMessage, user *model.User, session *BotSession) {
@@ -511,8 +744,37 @@ func (h *BotHandler) requestWizardTextStep(msg *svc.TGMessage, user *model.User,
 	if idx >= len(requestSteps) { return }
 	step := requestSteps[idx]
 
+	// _customer adımında: buton kullanmadıysa elle ad yazıyor
+	if step.Key == "_customer" {
+		text := strings.TrimSpace(msg.Text)
+		if text == "" || text == "-" {
+			h.tg.SendMessage(chatID, "👤 Müşteri adını yazın:", nil)
+			return
+		}
+		// "Ad Soyad · Tel" formatında mı geldi (listeden seçim)
+		parts := strings.SplitN(text, " · ", 2)
+		session.Data["client_name"] = strings.TrimSpace(parts[0])
+		if len(parts) == 2 {
+			session.Data["phone"] = strings.TrimSpace(parts[1])
+		} else {
+			// Sadece isim — telefon sonra sorulacak
+			session.Data["phone"] = ""
+			// Telefon adımı için ek sorgu
+			nextIdx := idx + 1
+			session.Data["_step_idx"] = strconv.Itoa(nextIdx)
+			h.saveSession(session)
+			h.tg.SendMessage(chatID, "📞 Telefon numarasını yazın:", nil)
+			return
+		}
+		nextIdx := idx + 1
+		session.Data["_step_idx"] = strconv.Itoa(nextIdx)
+		h.saveSession(session)
+		h.sendRequestStep(chatID, session, nextIdx, session.UserID)
+		return
+	}
+
 	if step.Prompt == "" {
-		h.sendRequestStep(chatID, session, idx)
+		h.sendRequestStep(chatID, session, idx, session.UserID)
 		return
 	}
 
@@ -528,7 +790,7 @@ func (h *BotHandler) requestWizardTextStep(msg *svc.TGMessage, user *model.User,
 		h.finalizeRequest(chatID, user, session.Data)
 		return
 	}
-	h.sendRequestStep(chatID, session, nextIdx)
+	h.sendRequestStep(chatID, session, nextIdx, session.UserID)
 }
 
 func (h *BotHandler) requestWizardCallbackStep(chatID int64, user *model.User, session *BotSession, cbData string) {
@@ -536,10 +798,28 @@ func (h *BotHandler) requestWizardCallbackStep(chatID int64, user *model.User, s
 	if idx >= len(requestSteps) { return }
 	step := requestSteps[idx]
 
-	prefixes := []string{"rwiz_lt_", "rwiz_pt_", "rwiz_dist_", "rwiz_hood_"}
+	prefixes := []string{"rwiz_lt_", "rwiz_pt_", "rwiz_dist_", "rwiz_hood_", "rwiz_cust_"}
 	val := cbData
 	for _, p := range prefixes {
 		if strings.HasPrefix(cbData, p) { val = strings.TrimPrefix(cbData, p); break }
+	}
+	// Müşteri seçimi: "Ad · Tel" veya "rwiz_cust_elle" (elle yazacak)
+	if step.Key == "_customer" {
+		if cbData == "rwiz_cust_elle" {
+			h.tg.SendMessage(chatID, "👤 Müşteri adını yazın:", nil)
+			return
+		}
+		// "Ad Soyad · Tel" ayrıştır
+		parts := strings.SplitN(val, " · ", 2)
+		session.Data["client_name"] = strings.TrimSpace(parts[0])
+		if len(parts) == 2 {
+			session.Data["phone"] = strings.TrimSpace(parts[1])
+		}
+		nextIdx := idx + 1
+		session.Data["_step_idx"] = strconv.Itoa(nextIdx)
+		h.saveSession(session)
+		h.sendRequestStep(chatID, session, nextIdx, session.UserID)
+		return
 	}
 	session.Data[step.Key] = val
 
@@ -551,14 +831,24 @@ func (h *BotHandler) requestWizardCallbackStep(chatID int64, user *model.User, s
 		h.finalizeRequest(chatID, user, session.Data)
 		return
 	}
-	h.sendRequestStep(chatID, session, nextIdx)
+	h.sendRequestStep(chatID, session, nextIdx, session.UserID)
 }
 
-func (h *BotHandler) sendRequestStep(chatID int64, session *BotSession, idx int) {
+func (h *BotHandler) sendRequestStep(chatID int64, session *BotSession, idx int, userID ...int64) {
 	if idx >= len(requestSteps) { return }
 	step := requestSteps[idx]
 
 	switch step.Key {
+	case "_customer":
+		// Son 10 müşteriyi listele + "Elle yaz" seçeneği
+		uid := int64(0); if len(userID) > 0 { uid = userID[0] }
+		customers, _ := h.customerRepo.List(uid, false, "")
+		if len(customers) == 0 {
+			h.tg.SendMessage(chatID, "👤 Müşteri adını yazın:", nil)
+		} else {
+			h.tg.SendMessage(chatID, "👤 Müşteri seçin veya 'Elle yaz' deyin:",
+				h.customerPickerKeyboard(customers[:intMin(len(customers), 10)]))
+		}
 	case "listing_type":
 		h.tg.SendMessage(chatID, "🏷️ Satılık mı, Kiralık mı?",
 			svc.ListingTypeKeyboard("rwiz_lt"))
@@ -591,6 +881,27 @@ func (h *BotHandler) finalizeRequest(chatID int64, user *model.User, data map[st
 		"budget":        data["budget_max"],
 		"notes":         data["notes"],
 	}
+	// Müşteri yoksa otomatik oluştur
+	if fields["client_name"] != "" {
+		customers, _ := h.customerRepo.List(user.ID, false, fields["client_name"])
+		var custID int64
+		for _, c := range customers {
+			if strings.EqualFold(c.Name, fields["client_name"]) {
+				custID = c.ID
+				break
+			}
+		}
+		if custID == 0 {
+			newC := &model.Customer{UserID: user.ID, Name: fields["client_name"], Phone: fields["phone"]}
+			if err := h.customerRepo.Create(newC); err == nil {
+				custID = newC.ID
+			}
+		}
+		if custID > 0 {
+			fields["customer_id"] = strconv.FormatInt(custID, 10)
+		}
+	}
+
 	req := &model.Request{
 		UserID:   user.ID,
 		Fields:   fields,
@@ -661,6 +972,63 @@ func (h *BotHandler) setNotify(chatID, userID int64, on bool) {
 	h.db.Exec(`UPDATE users SET notify_telegram=$1 WHERE id=$2`, on, userID)
 }
 
+func (h *BotHandler) sendBotListingNotification(listing *model.Listing, owner *model.User) {
+	usersWithChat, err := h.userRepo.ListWithChatIDs()
+	if err != nil {
+		log.Printf("[bot-notify] ListWithChatIDs: %v", err)
+		return
+	}
+	var allUsers []svc.UserForNotify
+	for _, u := range usersWithChat {
+		chatID, _ := strconv.ParseInt(u.TelegramChatID, 10, 64)
+		if chatID == 0 { continue }
+		allUsers = append(allUsers, svc.UserForNotify{
+			ID:         u.ID,
+			ChatID:     chatID,
+			NotifyType: "all",
+		})
+	}
+	reqs, _ := h.requestRepo.List(repository.RequestFilter{OnlyActive: true})
+	var requests []svc.RequestForMatch
+	for _, req := range reqs {
+		if !req.NotifyMe { continue }
+		requests = append(requests, svc.RequestForMatch{
+			ID:     req.ID,
+			UserID: req.UserID,
+			Fields: req.Fields,
+		})
+	}
+	lm := svc.ListingForMatch{
+		ID:        listing.ID,
+		ListingNo: listing.ListingNo,
+		UserID:    listing.UserID,
+		OwnerID:   listing.UserID,
+		OwnerName: owner.FullName,
+		IsActive:  listing.IsActive,
+		Fields:    listing.Fields,
+	}
+	h.notifySvc.NotifyNewListing(lm, allUsers, requests)
+}
+
+func intMin(a, b int) int { if a < b { return a }; return b }
+
+func (h *BotHandler) customerPickerKeyboard(customers []model.Customer) *svc.TGInlineKeyboard {
+	var rows [][]svc.TGInlineButton
+	for _, c := range customers {
+		label := c.Name
+		if c.Phone != "" { label += " · " + c.Phone }
+		rows = append(rows, []svc.TGInlineButton{{
+			Text:         label,
+			CallbackData: "rwiz_cust_" + label,
+		}})
+	}
+	rows = append(rows,
+		[]svc.TGInlineButton{{Text: "✏️ Elle yaz", CallbackData: "rwiz_cust_elle"}},
+		[]svc.TGInlineButton{{Text: "❌ İptal", CallbackData: "wizard_cancel"}},
+	)
+	return &svc.TGInlineKeyboard{InlineKeyboard: rows}
+}
+
 func (h *BotHandler) sendMainMenu(chatID int64, intro string) {
 	h.tg.SendMessage(chatID, intro, svc.MainMenuKeyboard())
 }
@@ -668,6 +1036,38 @@ func (h *BotHandler) sendMainMenu(chatID int64, intro string) {
 func (h *BotHandler) districtKeyboardWithAll(prefix string) *svc.TGInlineKeyboard {
 	districts := append([]string{"Tümü"}, h.cfg.Districts...)
 	return svc.DistrictKeyboard(districts, prefix)
+}
+
+func (h *BotHandler) sendMyTasks(chatID int64, user *model.User) {
+	tasks, err := h.taskRepo.List(model.TaskFilter{UserID: user.ID})
+	if err != nil || len(tasks) == 0 {
+		h.tg.SendMessage(chatID, "📭 Atanmış göreviniz bulunmuyor.", nil)
+		return
+	}
+
+	h.tg.SendMessage(chatID, fmt.Sprintf("✅ <b>Görevlerim</b> (%d adet):", len(tasks)), nil)
+
+	for i, t := range tasks {
+		if i >= 10 { break }
+		statusEmoji := map[string]string{
+			"bekliyor": "⏳", "devam_ediyor": "🔄", "tamamlandi": "✅", "iptal": "❌",
+		}
+		priEmoji := map[string]string{
+			"dusuk": "🟢", "normal": "🔵", "yuksek": "🟠", "acil": "🔴",
+		}
+		em := statusEmoji[t.Status]
+		if em == "" { em = "📋" }
+		pr := priEmoji[t.Priority]
+		if pr == "" { pr = "🔵" }
+
+		due := ""
+		if t.DueDate != nil {
+			due = "\n📅 " + t.DueDate.Format("02.01.2006")
+		}
+		h.tg.SendMessage(chatID,
+			fmt.Sprintf("%s %s <b>%s</b>%s\n<i>%s</i>",
+				em, pr, t.Title, due, t.Description), nil)
+	}
 }
 
 func (h *BotHandler) sendMyRequests(chatID int64, user *model.User) {
@@ -708,5 +1108,5 @@ func (h *BotHandler) sendMyRequests(chatID int64, user *model.User) {
 		)
 		h.tg.SendMessage(chatID, text, nil)
 	}
-	h.tg.SendMessage(chatID, "─────────────", svc.MainMenuKeyboard())
+	h.tg.SendMessage(chatID, "─────────────\nAna menüye dönmek için /menu yazın.", nil)
 }

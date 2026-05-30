@@ -83,6 +83,7 @@ func (h *ConfigHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		RequestByProp  map[string][]string      `json:"request_by_property"`
 		AutoTaskTemplates []config.AutoTaskTemplate  `json:"auto_task_templates"`
 		CustomLists       map[string][]string        `json:"custom_lists"`
+		DailySummary      *config.DailySummaryConfig `json:"daily_summary"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonErr(w, "Geçersiz istek", http.StatusBadRequest)
@@ -104,6 +105,7 @@ func (h *ConfigHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if body.AutoTaskTemplates != nil { h.cfg.AutoTaskTemplates = body.AutoTaskTemplates }
 	if body.CustomLists       != nil { h.cfg.CustomLists       = body.CustomLists }
 	if body.AutoTaskTemplates != nil { h.cfg.AutoTaskTemplates        = body.AutoTaskTemplates }
+	if body.DailySummary      != nil { h.cfg.DailySummary             = *body.DailySummary      }
 
 	f, err := os.Create(h.cfgPath)
 	if err != nil {
