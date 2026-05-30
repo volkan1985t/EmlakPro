@@ -190,6 +190,11 @@ const PROP_PLACEHOLDER = {
   'default':{ grad: 'linear-gradient(135deg,#37474f 0%,#90a4ae 100%)', icon: '🏠', label: ''      },
 };
 
+function ptypeClass(pt) {
+  const map = { 'Daire':'daire', 'Villa':'villa', 'Arsa':'arsa', 'Ticari':'ticari' };
+  return map[pt] || 'default';
+}
+
 function cardPlaceholder(propType) {
   const p = PROP_PLACEHOLDER[propType] || PROP_PLACEHOLDER['default'];
   return `<div class="card-img-gradient" style="background:${p.grad}">
@@ -238,7 +243,8 @@ function renderListings() {
     const cfg      = state.cfg;
     const propType = il.fields?.property_type||'Daire';
     const cardKeys = cfg?.listing_fields?.card_fields?.[propType]||[];
-    const tagsHTML = cardKeys.slice(0,4).map(k => {
+    // listing_type ve property_type üstte rozet olarak var, meta satırında tekrar gösterme
+    const tagsHTML = cardKeys.filter(k => k!=='listing_type' && k!=='property_type').slice(0,4).map(k => {
       const v = il.fields?.[k]; return v ? `<span class="meta-tag">${v}</span>` : '';
     }).join('');
 
@@ -288,8 +294,7 @@ function renderListings() {
         <div class="card-title-row">
           <div class="card-title">${il.fields?.title||'—'}</div>
           <div class="card-type-badges">
-            ${il.fields?.property_type ? `<span class="card-ptype">${il.fields.property_type}</span>` : ''}
-            ${il.fields?.listing_type ? `<span class="card-ltype card-ltype-${il.fields.listing_type==='Satılık'?'sale':'rent'}">${il.fields.listing_type}</span>` : ''}
+            ${il.fields?.property_type ? `<span class="card-ptype card-ptype-${ptypeClass(il.fields.property_type)}">${il.fields.property_type}</span>` : ''}
           </div>
         </div>
         <div class="card-meta">${tagsHTML}</div>
@@ -463,14 +468,14 @@ async function openDetailModal(id) {
 }
 
 async function toggleCrmAccordion(id, e) {
-  if (e && e.target && e.target.closest && e.target.closest('.icon-btn')) return;
+  if (e && e.target && e.target.closest && (e.target.closest('.crm-ibt') || e.target.closest('.crm-link-btn'))) return;
   const acc  = document.getElementById('crm-acc-'+id);
   const chev = document.getElementById('chev-'+id);
   if (!acc) return;
   const isOpen = acc.style.display !== 'none';
-  if (isOpen) { acc.style.display='none'; if(chev) chev.textContent='▸'; return; }
+  if (isOpen) { acc.style.display='none'; if(chev) chev.classList.remove('open'); return; }
   acc.style.display = 'block';
-  if (chev) chev.textContent = '▾';
+  if (chev) chev.classList.add('open');
   try {
     const listings = await API.getCustomerListings(id)||[];
     const ilanListHTML = listings.length
@@ -481,7 +486,7 @@ async function toggleCrmAccordion(id, e) {
               <div class="crm-acc-title">${il.fields?.title||'—'} <span class="mini-no">#${il.listing_no||''}</span></div>
               <div class="crm-acc-meta">${il.fields?.district||''} · ${fiyatFormat(il.fields?.price_max||il.fields?.price)}</div>
             </div>
-            <button class="btn btn-sm btn-danger" onclick="doCrmUnlink(${id},${il.id},event)">Kaldır</button>
+            <button class="crm-unlink-btn" onclick="doCrmUnlink(${id},${il.id},event)"><i class="ti ti-unlink"></i> Kaldır</button>
           </div>`).join('')
       : '<div class="crm-acc-empty">Bağlı ilan yok.</div>';
     acc.innerHTML = ilanListHTML;
@@ -1136,9 +1141,8 @@ function renderRequests() {
       ? `${fiyatFormat(bMin)} – ${fiyatFormat(bMax)}`
       : bMax ? `maks ${fiyatFormat(bMax)}` : '';
 
-    // Eşleşme badge rengi
-    const matchBadgeClass = matches.length >= 3 ? 'match-high'
-      : matches.length >= 1 ? 'match-mid' : 'match-zero';
+    // Eşleşme badge rengi — var (yeşil) / yok (kırmızı)
+    const matchBadgeClass = matches.length >= 1 ? 'match-high' : 'match-zero';
 
     // Kriterler + açıklama
     const tags = [
@@ -1300,6 +1304,27 @@ async function openEditRequest(id,e) {
   if(t) openTalepModal(t);
 }
 function closeTalepModal() { document.getElementById('talep-overlay').classList.remove('open'); }
+
+// Müşteri tabından talep ekle — müşteri bilgisini önceden doldurur
+function openTalepForCustomer(customerId, e) {
+  if (e) e.stopPropagation();
+  const c = state.customers.find(x => x.id === customerId);
+  if (!c) { openTalepModal(); return; }
+  // Sahte bir talep objesi ile modalı aç — müşteri bilgisi dolu gelir
+  openTalepModal({
+    id: null,
+    customer_id: c.id,
+    fields: { client_name: c.name, phone: c.phone || '' }
+  });
+  // Combobox'a bağlı müşteriyi işaretle
+  _comboboxSelected = { id: c.id, name: c.name, phone: c.phone || '' };
+  setTimeout(() => {
+    const hidden = document.getElementById('tf-customer_id');
+    if (hidden) hidden.value = c.id;
+    const hint = document.getElementById('combobox-linked-hint');
+    if (hint) hint.style.display = 'inline';
+  }, 50);
+}
 
 /* ── Müşteri Combobox (Talep Formu) ─────────────────────────── */
 let _comboboxDebounce = null;
@@ -1483,12 +1508,13 @@ function buildTalepForm(talep) {
 
   // ── 7. Combobox (müşteri) — en üstte ────────────────────────────
   _comboboxSelected = null;
+  const cid = talep?.customer_id || talep?.fields?.customer_id || '';
   const comboboxBlock = buildCustomerCombobox(
     talep?.fields?.client_name || '',
     talep?.fields?.phone || '',
-    talep?.fields?.customer_id || ''
+    cid
   );
-  const hasCid = !!(talep?.fields?.customer_id);
+  const hasCid = !!cid;
 
   // ── 8. DOM'a yaz ─────────────────────────────────────────────────
   document.getElementById('talep-form-body').innerHTML =
@@ -1612,18 +1638,19 @@ function renderCustomers() {
         <div class="crm-info">
           <div class="crm-name">${c.name}</div>
           <div class="crm-meta">
-            ${c.phone?`📞 ${c.phone}`:''}
-            ${c.email?` · 📧 ${c.email}`:''}
+            ${c.phone?`<i class="ti ti-phone crm-meta-ico"></i> ${c.phone}`:''}
+            ${c.email?` · <i class="ti ti-mail crm-meta-ico"></i> ${c.email}`:''}
             ${c.source?` · <span class="tag tag-sm tag-blue">${c.source}</span>`:''}
           </div>
           ${c.notes?`<div class="crm-notes muted">${c.notes.slice(0,80)}${c.notes.length>80?'…':''}</div>`:''}
         </div>
         <div class="crm-actions">
-          <button class="btn btn-sm btn-outline" onclick="openCrmLinkListing(${c.id},event)">+ İlan Bağla</button>
-          <button class="icon-btn icon-btn-edit" onclick="openEditCustomer(${c.id},event)">✏️</button>
-          <button class="icon-btn" onclick="doToggleCustomer(${c.id},event)" title="${c.is_active?'Pasife Al':'Aktif Et'}">${c.is_active?'⏸':'▶️'}</button>
-          <button class="icon-btn icon-btn-delete" onclick="doDeleteCustomer(${c.id},event)">🗑️</button>
-          <span class="crm-chevron" id="chev-${c.id}">▸</span>
+          <button class="crm-link-btn crm-btn-navy" onclick="openCrmLinkListing(${c.id},event)"><i class="ti ti-link"></i> İlan Bağla</button>
+          <button class="crm-link-btn crm-btn-teal" onclick="openTalepForCustomer(${c.id},event)"><i class="ti ti-target"></i> Talep Ekle</button>
+          <button class="crm-ibt" onclick="openEditCustomer(${c.id},event)" title="Düzenle"><i class="ti ti-edit"></i></button>
+          <button class="crm-ibt" onclick="doToggleCustomer(${c.id},event)" title="${c.is_active?'Pasife Al':'Aktif Et'}"><i class="ti ${c.is_active?'ti-player-pause':'ti-player-play'}"></i></button>
+          <button class="crm-ibt crm-ibt-danger" onclick="doDeleteCustomer(${c.id},event)" title="Sil"><i class="ti ti-trash"></i></button>
+          <i class="ti ti-chevron-down crm-chevron" id="chev-${c.id}"></i>
         </div>
       </div>
       <div class="crm-accordion" id="crm-acc-${c.id}" style="display:block">
@@ -1798,21 +1825,33 @@ function renderDashboard(d) {
   document.getElementById('dash-content').innerHTML = `
     <!-- Özet Kartlar -->
     <div class="dash-cards">
-      <div class="dash-card dash-card-blue">
-        <div class="dash-card-num">${d.total_listings}</div>
-        <div class="dash-card-lbl">Toplam İlan</div>
+      <div class="dash-card">
+        <div class="dash-card-ico ico-blue"><i class="ti ti-building"></i></div>
+        <div class="dash-card-txt">
+          <div class="dash-card-num">${d.total_listings}</div>
+          <div class="dash-card-lbl">Toplam İlan</div>
+        </div>
       </div>
-      <div class="dash-card dash-card-green">
-        <div class="dash-card-num">${d.active_listings}</div>
-        <div class="dash-card-lbl">Aktif İlan</div>
+      <div class="dash-card">
+        <div class="dash-card-ico ico-green"><i class="ti ti-circle-check"></i></div>
+        <div class="dash-card-txt">
+          <div class="dash-card-num">${d.active_listings}</div>
+          <div class="dash-card-lbl">Aktif İlan</div>
+        </div>
       </div>
-      <div class="dash-card dash-card-amber">
-        <div class="dash-card-num">${d.passive_listings}</div>
-        <div class="dash-card-lbl">Pasif İlan</div>
+      <div class="dash-card">
+        <div class="dash-card-ico ico-amber"><i class="ti ti-player-pause"></i></div>
+        <div class="dash-card-txt">
+          <div class="dash-card-num">${d.passive_listings}</div>
+          <div class="dash-card-lbl">Pasif İlan</div>
+        </div>
       </div>
-      <div class="dash-card dash-card-purple">
-        <div class="dash-card-num">${d.listed_listings}</div>
-        <div class="dash-card-lbl">Vitrin'de</div>
+      <div class="dash-card">
+        <div class="dash-card-ico ico-teal"><i class="ti ti-star"></i></div>
+        <div class="dash-card-txt">
+          <div class="dash-card-num">${d.listed_listings}</div>
+          <div class="dash-card-lbl">Vitrin'de</div>
+        </div>
       </div>
     </div>
 
