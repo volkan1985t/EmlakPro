@@ -265,6 +265,16 @@ function renderListings() {
     const unlistedBadge = isUnlisted && isOwner
       ? `<span class="badge badge-unlisted" title="Ana sayfada gösterilmiyor">👁 Gizli</span>` : '';
 
+    // Telegram'dan eklenmiş mi
+    const tgBadge = (il.fields?._source === 'telegram')
+      ? `<span class="badge badge-telegram" title="Telegram'dan eklendi"><i class="ti ti-brand-telegram"></i></span>` : '';
+
+    // Eksik alan kontrolü — temel alanlar dolu mu
+    const requiredFields = ['title','price','district','property_type','listing_type'];
+    const missingCount = requiredFields.filter(k => !il.fields?.[k] || String(il.fields[k]).trim()==='').length;
+    const incompleteBadge = (missingCount > 0 && isOwner)
+      ? `<span class="badge badge-incomplete" title="${missingCount} eksik alan var"><i class="ti ti-alert-triangle"></i> Eksik</span>` : '';
+
     const noTag = il.listing_no ? `<span class="listing-no">#${il.listing_no}</span>` : '';
     const imgHTML = il.cover_image
       ? `<img src="${il.cover_image}" alt="${il.fields?.title||''}" loading="lazy">`
@@ -288,7 +298,9 @@ function renderListings() {
 
     return `<div class="card${isPassive?' card-passive':''}${isUnlisted?' card-unlisted':''}" data-id="${il.id}">
       <div class="card-img">
-        ${imgHTML}${badge}${unlistedBadge}${noTag}${ownerActions}
+        ${imgHTML}
+        <div class="card-badges">${badge}${unlistedBadge}${tgBadge}${incompleteBadge}</div>
+        ${noTag}${ownerActions}
       </div>
       <div class="card-body">
         <div class="card-title-row">
@@ -775,14 +787,17 @@ function buildIlanForm(ilan) {
   renderIlanFormFields(allFields, ilan, isAdmin, propType);
   renderIlanChannels(ilan);
   renderIlanAutoTasks(ilan);
+  // Bildirim kutusu her zaman kapalı başlasın
+  const notifyAllBox = document.getElementById('ilan-notify-all');
+  if (notifyAllBox) notifyAllBox.checked = false;
 }
 
 function renderIlanChannels(ilan) {
   const grid = document.getElementById('ilan-channels-grid');
   if (!grid) return;
   const channels = state.cfg?.listing_channels || [];
-  const selected = ilan?.fields?.channels ? ilan.fields.channels.split(',') : 
-    channels.filter(c=>c.active).map(c=>c.key);
+  // Düzenlemede kayıtlı kanallar seçili; yeni ilanda hiçbiri seçili gelmesin
+  const selected = ilan?.fields?.channels ? ilan.fields.channels.split(',') : [];
   grid.innerHTML = channels.map(ch => {
     const isSel = selected.includes(ch.key);
     return '<div class="channel-card' + (isSel?' selected':'') + '" data-ch="'+ch.key+'">' +
@@ -800,10 +815,10 @@ function renderIlanAutoTasks(ilan) {
   const list = document.getElementById('ilan-autotasks-list');
   if (!list) return;
   const tasks = state.cfg?.auto_task_templates || [];
+  // Hiçbiri seçili gelmesin — kullanıcı isteğini bilinçli işaretlesin
   list.innerHTML = tasks.map(t => {
-    const checked = t.active ? 'checked' : '';
     return '<label class="check-item">' +
-      '<input type="checkbox" ' + checked + ' data-task="'+t.key+'" data-label="'+escHtml(t.label)+'">' +
+      '<input type="checkbox" data-task="'+t.key+'" data-label="'+escHtml(t.label)+'">' +
       escHtml(t.label) +
     '</label>';
   }).join('');
@@ -815,6 +830,17 @@ function getSelectedChannels() {
     selected.push(el.dataset.ch);
   });
   return selected.join(',');
+}
+
+// Seçili kanalların label'larını döndürür (alt görev başlığı için)
+function getSelectedChannelLabels() {
+  const labels = [];
+  const chCfg = state.cfg?.listing_channels || [];
+  document.querySelectorAll('#ilan-channels-grid .channel-card.selected').forEach(el => {
+    const ch = chCfg.find(c => c.key === el.dataset.ch);
+    labels.push(ch?.label || el.dataset.ch);
+  });
+  return labels;
 }
 
 function getSelectedAutoTasks() {
@@ -952,11 +978,13 @@ document.getElementById('kaydet-btn').addEventListener('click', async ()=>{
 
   try {
     const cid = parseInt(document.getElementById("f-customer_id")?.value)||0;
+    const notifyAll = document.getElementById('ilan-notify-all')?.checked || false;
     const payload = {
       fields, cover_image: state.coverPath,
       images: state.galleryPaths.map(g=>g.path),
       remove_images: state.removedImageIds,
       customer_id: cid,
+      notify_all: notifyAll,
     };
     if (state.editListingId) {
       await API.updateListing(state.editListingId, payload);
@@ -969,7 +997,7 @@ document.getElementById('kaydet-btn').addEventListener('click', async ()=>{
       if (autoTasks.length && newListing?.id) {
         for (const t of autoTasks) {
           try {
-            await API.createTask({
+            const parentTask = await API.createTask({
               title: t.label + ' — ' + (fields.title||''),
               description: '',
               status: 'bekliyor',
@@ -978,6 +1006,24 @@ document.getElementById('kaydet-btn').addEventListener('click', async ()=>{
               assignees: [API.getUserID()],
               parent_id: null,
             });
+            // "Kanallarda yayınla" görevi ise → seçili kanalları alt görev yap
+            const isPublishTask = /kanal|yay[ıi]nla|yay[ıi]n/i.test(t.label) || /kanal|yayin|publish/i.test(t.key||'');
+            if (isPublishTask && parentTask?.id) {
+              const chLabels = getSelectedChannelLabels();
+              for (const chLabel of chLabels) {
+                try {
+                  await API.createTask({
+                    title: chLabel + ' — ' + (fields.title||''),
+                    description: 'Kanal yayını: ' + chLabel,
+                    status: 'bekliyor',
+                    priority: 'normal',
+                    due_date: null,
+                    assignees: [API.getUserID()],
+                    parent_id: parentTask.id,
+                  });
+                } catch(_) {}
+              }
+            }
           } catch(_) {}
         }
       }
@@ -1187,23 +1233,23 @@ function renderRequests() {
           const thumb = il.cover_image
             ? `<img src="${il.cover_image}" class="rq-ilan-thumb" loading="lazy" alt="">`
             : `<div class="rq-ilan-icon">${(PROP_PLACEHOLDER[propType]||PROP_PLACEHOLDER.default).icon}</div>`;
-          const scoreClass = score >= 80 ? 'spill-high' : score >= 60 ? 'spill-mid' : 'spill-low';
-          // Sabit gösterilecek alanlar: mülk tipi, mahalle
+          // Skor rengi: %80+ yeşil, %60+ sarı, altı kırmızımsı
+          const scoreClass = score >= 80 ? 'mscore-high' : score >= 60 ? 'mscore-mid' : 'mscore-low';
           const metaParts = [
             il.fields?.property_type,
             il.fields?.neighborhood || il.fields?.district,
           ].filter(Boolean).map(v => `<span class="rq-meta-tag">${v}</span>`).join('');
           return `<div class="rq-ilan-row" onclick="openDetailModal(${il.id})">
             ${thumb}
-            <div class="req-ilan-info">
+            <div class="rq-ilan-info">
               <div class="rq-ilan-title">${escHtml(il.fields?.title||'—')}
                 ${il.listing_no ? `<span class="rq-ilan-no">#${il.listing_no}</span>` : ''}
               </div>
               <div class="rq-ilan-meta">${metaParts}</div>
             </div>
             <div class="rq-ilan-right">
-              <span class="req-score-pill ${scoreClass}">%${score}</span>
-              <span class="rq-price">${priceDisp}</span>
+              <span class="rq-score-pill ${scoreClass}">%${score}</span>
+              <span class="rq-price-pill">${priceDisp}</span>
             </div>
           </div>`;
         }).join('');
@@ -2153,15 +2199,16 @@ function onDragLeave(e) {
 async function onDrop(e) {
   e.preventDefault();
   const col = e.currentTarget.closest('.kanban-col');
-  col.classList.remove('drag-over');
-  const newStatus = col.dataset.status;
+  if (col) col.classList.remove('drag-over');
+  // Status önce kolondan, olmazsa cards alanından al
+  const newStatus = (col && col.dataset.status) || e.currentTarget.dataset.status;
   if (!_dragId || !newStatus) return;
   const task = state.tasks.find(t => t.id === _dragId);
   if (!task || task.status === newStatus) return;
   try {
     await API.updateTaskStatus(_dragId, newStatus);
     await loadTasks();
-  } catch(e) { showToast(e.message,'error'); }
+  } catch(err) { showToast(err.message,'error'); }
 }
 
 /* ── View toggle ─────────────────────────────────────── */
@@ -2277,6 +2324,13 @@ async function refreshGorevDetail(id) {
 
 function renderGorevDetail(t) {
   document.getElementById('gd-title').textContent = t.title;
+
+  // Sil butonu — admin veya görevi oluşturan görebilir
+  const delBtn = document.getElementById('gd-delete-btn');
+  if (delBtn) {
+    const canDelete = API.isAdmin() || Number(t.created_by) === Number(API.getUserID());
+    delBtn.style.display = canDelete ? '' : 'none';
+  }
   document.getElementById('gd-priority-badge').className = `priority-badge ${PRIORITY_CLASS[t.priority]||'prio-normal'}`;
   document.getElementById('gd-priority-badge').textContent = PRIORITY_LABEL[t.priority]||t.priority;
 
@@ -2382,6 +2436,23 @@ document.getElementById('gd-edit-btn')?.addEventListener('click', async ()=>{
     || await API.getTask(state.viewTaskId);
   document.getElementById('gorev-detail-overlay').classList.remove('open');
   await openGorevModal(t);
+});
+
+document.getElementById('gd-delete-btn')?.addEventListener('click', async ()=>{
+  const id = state.viewTaskId;
+  if (!id) return;
+  const t = state.tasks.find(x=>x.id===id);
+  const subCount = (t?.subtasks||[]).length;
+  const warn = subCount
+    ? `Bu görevi ve ${subCount} alt görevini silmek istediğinize emin misiniz?`
+    : 'Bu görevi silmek istediğinize emin misiniz?';
+  if (!confirm(warn)) return;
+  try {
+    await API.deleteTask(id);
+    showToast('Görev silindi');
+    document.getElementById('gorev-detail-overlay').classList.remove('open');
+    await loadTasks();
+  } catch(e) { showToast(e.message,'error'); }
 });
 
 document.getElementById('gd-add-subtask-btn')?.addEventListener('click', async ()=>{
@@ -3311,3 +3382,20 @@ document.getElementById('nf-option-input')?.addEventListener('keydown', e => {
 });
 
 init();
+
+/* ── Modal açıkken arka plan scroll kilidi ───────────────────── */
+(function setupModalScrollLock(){
+  function anyOpen() {
+    return document.querySelector('.overlay.open') !== null;
+  }
+  function sync() {
+    document.body.style.overflow = anyOpen() ? 'hidden' : '';
+  }
+  // Tüm overlay'lerdeki class değişimini izle
+  const obs = new MutationObserver(sync);
+  document.querySelectorAll('.overlay').forEach(ov => {
+    obs.observe(ov, { attributes: true, attributeFilter: ['class'] });
+  });
+  // İlk durum
+  sync();
+})();

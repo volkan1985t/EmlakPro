@@ -206,8 +206,12 @@ body {
 .card-img img { width:100%; height:100%; object-fit:cover; }
 .card-img-placeholder { font-size: 48px; opacity: .25; }
 
-.badge {
+.card-badges {
   position: absolute; top: 10px; left: 10px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
+  z-index: 2;
+}
+.badge {
   padding: 4px 12px;
   border-radius: 20px;
   font-size: 11px; font-weight: 700;
@@ -280,8 +284,11 @@ body {
   max-width: 520px;
   max-height: 90vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
   box-shadow: 0 24px 80px rgba(0,0,0,.25);
 }
+/* Modal açıkken arka plan scroll'u kilitle */
+.overlay.open { overscroll-behavior: contain; }
 .modal-lg { max-width: 780px; }
 
 .modal-header {
@@ -1118,7 +1125,7 @@ body {
   padding: 10px;
   min-height: 200px;
 }
-.kanban-col.drag-over { border-color: var(--gold); background: #fffde7; }
+.kanban-col.drag-over { border-color: var(--gold); background: #f0fdfa; }
 
 .kanban-col-header {
   display: flex; align-items: center; gap: 6px;
@@ -1133,7 +1140,7 @@ body {
   font-size: 11px;
   color: var(--muted);
 }
-.kanban-cards { display: flex; flex-direction: column; gap: 8px; }
+.kanban-cards { display: flex; flex-direction: column; gap: 8px; min-height: 120px; }
 
 /* Status dots */
 .status-dot {
@@ -2184,73 +2191,94 @@ body {
 .rq-ilan-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px;
-  border-radius: 8px;
-  margin-bottom: 4px;
+  gap: 12px;
+  padding: 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  background: #fcfcfd;
   cursor: pointer;
-  transition: background .12s;
+  transition: background .12s, border-color .12s, box-shadow .12s;
 }
-.rq-ilan-row:hover { background: var(--bg); }
+.rq-ilan-row:hover {
+  background: #fff;
+  border-color: var(--border2);
+  box-shadow: 0 1px 4px rgba(15,23,42,.06);
+}
+.rq-ilan-row:last-child { margin-bottom: 0; }
 .rq-ilan-thumb {
-  width: 44px;
-  height: 44px;
-  border-radius: 8px;
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
   object-fit: cover;
   flex-shrink: 0;
 }
 .rq-ilan-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 8px;
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
   background: var(--bg);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: 26px;
   flex-shrink: 0;
 }
 .rq-ilan-info { flex: 1; min-width: 0; }
 .rq-ilan-title {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .rq-ilan-no {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
-  margin-left: 4px;
+  margin-left: 5px;
   font-weight: 400;
 }
 .rq-ilan-meta {
   display: flex;
-  gap: 4px;
-  margin-top: 3px;
+  gap: 5px;
+  margin-top: 5px;
   flex-wrap: wrap;
 }
 .rq-meta-tag {
   font-size: 11px;
-  padding: 1px 6px;
-  background: var(--bg);
-  border-radius: 3px;
-  color: var(--text-muted);
+  padding: 2px 8px;
+  background: #eef2f6;
+  border-radius: 5px;
+  color: #475569;
+  font-weight: 500;
 }
 .rq-ilan-right {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 3px;
+  gap: 6px;
   flex-shrink: 0;
 }
-.rq-score {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 10px;
+.rq-score-pill {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 3px 11px;
+  border-radius: 20px;
 }
+.mscore-high { background: #dcfce7; color: #15803d; }   /* %80+ yeşil */
+.mscore-mid  { background: #fef9c3; color: #a16207; }   /* %60+ sarı */
+.mscore-low  { background: #fee2e2; color: #b91c1c; }   /* altı kırmızı */
+.rq-price-pill {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 3px 11px;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  white-space: nowrap;
+}
+/* eski s-hi/mid/lo (geri uyum) */
 .s-hi { background: #e8f5e9; color: #1b5e20; }
 .s-mid{ background: #fff8e1; color: #e65100; }
 .s-lo { background: #fce4ec; color: #880e4f; }
@@ -2375,3 +2403,72 @@ body {
 }
 .crm-unlink-btn:hover { background: #fef2f2; }
 .crm-unlink-btn i { font-size: 13px; }
+
+/* ── İlan detay modal başlık + aksiyonlar ───────────────────── */
+.detail-modal-head {
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 0.5px solid var(--border);
+}
+.detail-head-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.detail-head-top h3 {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.3;
+  flex: 1;
+  min-width: 0;
+}
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.detail-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+  white-space: nowrap;
+}
+.detail-act:hover { background: var(--bg); border-color: var(--border2); }
+.detail-act i { font-size: 16px; color: var(--muted); }
+.detail-act-primary {
+  background: var(--navy);
+  color: #fff;
+  border-color: var(--navy);
+}
+.detail-act-primary i { color: #fff; }
+.detail-act-primary:hover { background: var(--navy2); border-color: var(--navy2); }
+
+/* ── İlan kartı ek badge'ler (Telegram + Eksik) ─────────────── */
+.badge-telegram {
+  background: #229ED9;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.badge-telegram i { font-size: 14px; }
+.badge-incomplete {
+  background: #fef3c7;
+  color: #b45309;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.badge-incomplete i { font-size: 13px; }

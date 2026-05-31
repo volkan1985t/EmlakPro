@@ -160,7 +160,7 @@ func (h *ListingHandler) Create(w http.ResponseWriter, r *http.Request) {
 		full.CoverImage = h.imageSvc.PathToURL(full.CoverImage)
 		for i := range full.Images { full.Images[i].Path = h.imageSvc.PathToURL(full.Images[i].Path) }
 		if h.notifySvc != nil {
-			go h.sendListingNotification(full)
+			go h.sendListingNotification(full, req.NotifyAll)
 		}
 		jsonOK(w, full)
 	} else {
@@ -168,7 +168,7 @@ func (h *ListingHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *ListingHandler) sendListingNotification(listing *model.Listing) {
+func (h *ListingHandler) sendListingNotification(listing *model.Listing, notifyAll bool) {
 	usersWithChat, err := h.userRepo.ListWithChatIDs()
 	if err != nil {
 		log.Printf("[notify] ListWithChatIDs: %v", err)
@@ -230,7 +230,7 @@ func (h *ListingHandler) sendListingNotification(listing *model.Listing) {
 		})
 	}
 
-	h.notifySvc.NotifyNewListing(lm, allUsers, requests)
+	h.notifySvc.NotifyNewListing(lm, allUsers, requests, notifyAll)
 }
 
 

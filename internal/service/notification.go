@@ -18,6 +18,7 @@ func (n *NotificationService) NotifyNewListing(
 	listing ListingForMatch,
 	allUsers []UserForNotify,
 	requests []RequestForMatch,
+	notifyAll bool,
 ) {
 	price := listing.Fields["price"]
 	if price == "" {
@@ -64,7 +65,7 @@ func (n *NotificationService) NotifyNewListing(
 		}
 	}
 
-	// ADIM 1: Herkese bildirim
+	// ADIM 1: Genel bildirim — yalnızca "herkese bildir" seçiliyse
 	for _, u := range allUsers {
 		if u.ChatID == 0 {
 			continue
@@ -73,11 +74,16 @@ func (n *NotificationService) NotifyNewListing(
 			continue
 		}
 
-		// İlan sahibine özel mesaj
+		// İlan sahibine her zaman "ilanınız eklendi" mesajı
 		if u.ID == listing.OwnerID {
 			if err := n.tg.SendNotification(u.ChatID, ownerText); err != nil {
 				log.Printf("İlan sahibi bildirimi hatası: %v", err)
 			}
+			continue
+		}
+
+		// Herkese bildir seçili değilse genel bildirim gönderme
+		if !notifyAll {
 			continue
 		}
 
@@ -109,20 +115,44 @@ func (n *NotificationService) NotifyNewListing(
 		if req.UserChatID == 0 {
 			continue
 		}
+		// Talep kriterleri özeti
+		reqType := req.Fields["listing_type"]
+		if reqType == "" { reqType = "-" }
+		reqProp := req.Fields["property_type"]
+		if reqProp == "" { reqProp = "-" }
+		reqLoc := req.Fields["district"]
+		if req.Fields["neighborhood"] != "" {
+			reqLoc = reqLoc + " / " + req.Fields["neighborhood"]
+		}
+		if reqLoc == "" { reqLoc = "-" }
+
+		// İlan tipi + mülk tipi
+		ilanType := listing.Fields["listing_type"]
+		if ilanType == "" { ilanType = "-" }
+		ilanProp := listing.Fields["property_type"]
+		if ilanProp == "" { ilanProp = "-" }
+
 		matchText := fmt.Sprintf(
-			"🎯 <b>Talebinize Uygun İlan Bulundu!</b>\n\n"+
+			"🎯 <b>Talebinize Uygun İlan Bulundu!</b>  (%%%d uyum)\n\n"+
+				"<b>📋 TALEP</b>\n"+
 				"👤 Müşteri: %s\n"+
-				"🏠 %s (#%d)\n"+
+				"🔖 %s · %s\n"+
+				"📍 %s\n\n"+
+				"<b>🏠 EŞLEŞEN İLAN</b>\n"+
+				"%s (#%d)\n"+
+				"🔖 %s · %s\n"+
 				"📍 %s / %s\n"+
-				"💰 %s ₺\n"+
-				"✅ Uyum: %%%d",
+				"💰 %s ₺",
+			req.Score,
 			req.Fields["client_name"],
+			reqType, reqProp,
+			reqLoc,
 			listing.Fields["title"],
 			listing.ListingNo,
+			ilanType, ilanProp,
 			listing.Fields["district"],
 			listing.Fields["neighborhood"],
 			FormatPrice(priceN),
-			req.Score,
 		)
 		log.Printf("EŞLEŞME BİLDİRİMİ: chatID=%d", req.UserChatID)
 		if err := n.tg.SendNotification(req.UserChatID, matchText); err != nil {
@@ -132,16 +162,21 @@ func (n *NotificationService) NotifyNewListing(
 		// İlan sahibine eşleşme bildirimi (bir kez)
 		if !notifiedOwner && listing.OwnerChatID != 0 {
 			ownerMatchText := fmt.Sprintf(
-				"🎯 <b>İlanınızla Eşleşen Talep Var!</b>\n\n"+
-					"🏠 %s (#%d)\n"+
-					"👤 Talep: %s\n"+
-					"📍 %s\n"+
-					"✅ Uyum: %%%d",
+				"🎯 <b>İlanınızla Eşleşen Talep Var!</b>  (%%%d uyum)\n\n"+
+					"<b>🏠 İLAN</b>\n"+
+					"%s (#%d)\n"+
+					"🔖 %s · %s\n\n"+
+					"<b>📋 EŞLEŞEN TALEP</b>\n"+
+					"👤 Müşteri: %s\n"+
+					"🔖 %s · %s\n"+
+					"📍 %s",
+				req.Score,
 				listing.Fields["title"],
 				listing.ListingNo,
+				ilanType, ilanProp,
 				req.Fields["client_name"],
-				req.Fields["district"],
-				req.Score,
+				reqType, reqProp,
+				reqLoc,
 			)
 			n.tg.SendNotification(listing.OwnerChatID, ownerMatchText)
 			notifiedOwner = true

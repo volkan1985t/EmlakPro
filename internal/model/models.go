@@ -172,6 +172,7 @@ type CreateListingRequest struct {
 	CoverImage string            `json:"cover_image"`
 	Images     []string          `json:"images"`
 	CustomerID  int64             `json:"customer_id"`
+	NotifyAll   bool              `json:"notify_all"`
 }
 type UpdateListingRequest struct {
 	Fields       map[string]string `json:"fields"`

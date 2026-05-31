@@ -16,7 +16,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=Playfair+Display:ital,wght@0,700;1,700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.0.0/dist/tabler-icons.min.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <link rel="stylesheet" href="/static/css/app.css?v=202605302003">
+  <link rel="stylesheet" href="/static/css/app.css?v=202605311310">
 </head>
 <body>
 
@@ -303,16 +303,18 @@
 <!-- DETAY MODAL -->
 <div class="overlay" id="detail-overlay">
   <div class="modal modal-lg">
-    <div class="modal-header">
-      <h3 id="detail-title">İlan Detayı</h3>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button class="btn btn-outline btn-sm" id="detail-malik-btn" style="display:none">👤 Malik</button>
-        <button class="btn btn-outline btn-sm" id="detail-history-btn">📋 Tarihçe</button>
-        <button class="btn btn-outline btn-sm" id="detail-share-btn">🔗 Paylaş</button>
-        <button class="btn btn-outline btn-sm" id="detail-listed-btn">👁 Gizle</button>
-        <button class="btn btn-outline btn-sm" id="detail-toggle-btn">⏸ Pasif</button>
-        <button class="btn btn-blue btn-sm" id="detail-edit-btn">✏️ Düzenle</button>
+    <div class="detail-modal-head">
+      <div class="detail-head-top">
+        <h3 id="detail-title">İlan Detayı</h3>
         <button class="close-btn" id="close-detail">×</button>
+      </div>
+      <div class="detail-actions">
+        <button class="detail-act" id="detail-malik-btn" style="display:none"><i class="ti ti-user"></i><span>Malik</span></button>
+        <button class="detail-act" id="detail-history-btn"><i class="ti ti-history"></i><span>Tarihçe</span></button>
+        <button class="detail-act" id="detail-share-btn"><i class="ti ti-share"></i><span>Paylaş</span></button>
+        <button class="detail-act" id="detail-listed-btn"><i class="ti ti-eye"></i><span>Gizle</span></button>
+        <button class="detail-act" id="detail-toggle-btn"><i class="ti ti-player-pause"></i><span>Pasif</span></button>
+        <button class="detail-act detail-act-primary" id="detail-edit-btn"><i class="ti ti-edit"></i><span>Düzenle</span></button>
       </div>
     </div>
     <div id="detail-content"></div>
@@ -419,6 +421,18 @@
     <div class="ilan-section">
       <div class="ilan-section-title">✅ Otomatik Görevler</div>
       <div class="checklist" id="ilan-autotasks-list"></div>
+    </div>
+
+    <!-- Bölüm 5: Bildirim -->
+    <div class="ilan-section">
+      <div class="ilan-section-title">🔔 Bildirim</div>
+      <label class="check-item">
+        <input type="checkbox" id="ilan-notify-all">
+        Bu ilanı tüm danışmanlara bildir
+      </label>
+      <div class="muted" style="font-size:12px;margin-top:4px;padding-left:2px">
+        İşaretlenmezse genel bildirim gitmez. Eşleşen aktif talep sahiplerine yine de bilgi verilir.
+      </div>
     </div>
 
     <div class="modal-footer">
@@ -625,7 +639,7 @@
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
         <button class="btn btn-blue btn-sm" id="gd-edit-btn">✏️ Düzenle</button>
-        <button class="btn btn-danger btn-sm admin-only" id="gd-delete-btn" style="display:none">🗑 Sil</button>
+        <button class="btn btn-danger btn-sm" id="gd-delete-btn" style="display:none">🗑 Sil</button>
         <button class="close-btn" id="close-gorev-detail">×</button>
       </div>
     </div>
@@ -697,8 +711,8 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/static/js/api.js?v=202605302003"></script>
-<script src="/static/js/app.js?v=202605302003"></script>
+<script src="/static/js/api.js?v=202605311310"></script>
+<script src="/static/js/app.js?v=202605311310"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

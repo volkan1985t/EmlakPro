@@ -204,7 +204,28 @@ func (h *BotHandler) handleCallback(cb *svc.TGCallback) {
 	case data == "wiz_photos_done":
 		session := h.getSession(chatID)
 		if session != nil && session.Step == "listing_wizard" {
-			h.finalizeListing(chatID, user, session.Data)
+			// Bildirim sorusu — finalize öncesi
+			kb := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{
+				{{Text: "🔔 Evet, herkese bildir", CallbackData: "wiz_notify_yes"}},
+				{{Text: "🔕 Hayır, bildirme", CallbackData: "wiz_notify_no"}},
+			}}
+			h.tg.SendMessage(chatID, "Bu ilanı tüm danışmanlara bildireyim mi?\n\n<i>Hayır deseniz de eşleşen aktif talep sahiplerine bilgi verilir.</i>", kb)
+		} else {
+			h.tg.SendMessage(chatID, "⚠️ Aktif ilan girişi bulunamadı.", nil)
+		}
+
+	case data == "wiz_notify_yes":
+		session := h.getSession(chatID)
+		if session != nil && session.Step == "listing_wizard" {
+			h.finalizeListing(chatID, user, session.Data, true)
+		} else {
+			h.tg.SendMessage(chatID, "⚠️ Aktif ilan girişi bulunamadı.", nil)
+		}
+
+	case data == "wiz_notify_no":
+		session := h.getSession(chatID)
+		if session != nil && session.Step == "listing_wizard" {
+			h.finalizeListing(chatID, user, session.Data, false)
 		} else {
 			h.tg.SendMessage(chatID, "⚠️ Aktif ilan girişi bulunamadı.", nil)
 		}
@@ -247,7 +268,7 @@ func (h *BotHandler) handleCallback(cb *svc.TGCallback) {
 				session.Data["_step_idx"] = strconv.Itoa(nextIdx)
 				h.saveSession(session)
 				if nextIdx >= len(steps) {
-					h.finalizeListing(chatID, user, session.Data)
+					h.askListingNotify(chatID)
 					return
 				}
 				h.sendNextListingStep(chatID, session, steps, nextIdx)
@@ -424,7 +445,7 @@ func (h *BotHandler) listingWizardTextStep(msg *svc.TGMessage, user *model.User,
 	idx, _   := strconv.Atoi(idxStr)
 
 	if idx >= len(steps) {
-		h.finalizeListing(chatID, user, session.Data)
+		h.askListingNotify(chatID)
 		return
 	}
 	currentStep := steps[idx]
@@ -451,7 +472,7 @@ func (h *BotHandler) listingWizardTextStep(msg *svc.TGMessage, user *model.User,
 	h.saveSession(session)
 
 	if nextIdx >= len(steps) {
-		h.finalizeListing(chatID, user, session.Data)
+		h.askListingNotify(chatID)
 		return
 	}
 
@@ -490,7 +511,7 @@ func (h *BotHandler) listingWizardCallbackStep(chatID int64, user *model.User, s
 	steps    := h.listingSteps(propType)
 	idx, _   := strconv.Atoi(session.Data["_step_idx"])
 	if idx >= len(steps) {
-		h.finalizeListing(chatID, user, session.Data)
+		h.askListingNotify(chatID)
 		return
 	}
 	currentStep := steps[idx]
@@ -512,7 +533,7 @@ func (h *BotHandler) listingWizardCallbackStep(chatID int64, user *model.User, s
 	h.saveSession(session)
 
 	if nextIdx >= len(steps) {
-		h.finalizeListing(chatID, user, session.Data)
+		h.askListingNotify(chatID)
 		return
 	}
 	nextStep := steps[nextIdx]
@@ -619,7 +640,16 @@ func (h *BotHandler) handleListingPhoto(msg *svc.TGMessage, user *model.User, se
 		}})
 }
 
-func (h *BotHandler) finalizeListing(chatID int64, user *model.User, data map[string]string) {
+// askListingNotify — finalize öncesi "herkese bildir?" sorusu gösterir
+func (h *BotHandler) askListingNotify(chatID int64) {
+	kb := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{
+		{{Text: "🔔 Evet, herkese bildir", CallbackData: "wiz_notify_yes"}},
+		{{Text: "🔕 Hayır, bildirme", CallbackData: "wiz_notify_no"}},
+	}}
+	h.tg.SendMessage(chatID, "Bu ilanı tüm danışmanlara bildireyim mi?\n\n<i>Hayır deseniz de eşleşen aktif talep sahiplerine bilgi verilir.</i>", kb)
+}
+
+func (h *BotHandler) finalizeListing(chatID int64, user *model.User, data map[string]string, notifyAll bool) {
 	fields := map[string]string{
 		"title":         data["title"],
 		"listing_type":  data["listing_type"],
@@ -633,6 +663,7 @@ func (h *BotHandler) finalizeListing(chatID int64, user *model.User, data map[st
 		"price_max":     data["price"],
 		"description":   data["description"],
 		"notes":         "Telegram ile eklendi. İletişim: " + data["contact"],
+		"_source":       "telegram",
 	}
 
 	listing := &model.Listing{
@@ -648,9 +679,9 @@ func (h *BotHandler) finalizeListing(chatID int64, user *model.User, data map[st
 	}
 	log.Printf("[BOT] ilan oluşturuldu: id=%d no=%d user=%d", listing.ID, listing.ListingNo, user.ID)
 
-	// Tüm kullanıcılara bildirim gönder
+	// Bildirim gönder (notifyAll'a göre genel + her durumda eşleşme)
 	if h.notifySvc != nil {
-		go h.sendBotListingNotification(listing, user)
+		go h.sendBotListingNotification(listing, user, notifyAll)
 	}
 
 	// Fotoğrafları indir ve kaydet
@@ -972,42 +1003,48 @@ func (h *BotHandler) setNotify(chatID, userID int64, on bool) {
 	h.db.Exec(`UPDATE users SET notify_telegram=$1 WHERE id=$2`, on, userID)
 }
 
-func (h *BotHandler) sendBotListingNotification(listing *model.Listing, owner *model.User) {
+func (h *BotHandler) sendBotListingNotification(listing *model.Listing, owner *model.User, notifyAll bool) {
 	usersWithChat, err := h.userRepo.ListWithChatIDs()
 	if err != nil {
 		log.Printf("[bot-notify] ListWithChatIDs: %v", err)
 		return
 	}
 	var allUsers []svc.UserForNotify
+	chatByUserID := map[int64]int64{}
 	for _, u := range usersWithChat {
 		chatID, _ := strconv.ParseInt(u.TelegramChatID, 10, 64)
 		if chatID == 0 { continue }
+		chatByUserID[u.ID] = chatID
 		allUsers = append(allUsers, svc.UserForNotify{
 			ID:         u.ID,
 			ChatID:     chatID,
 			NotifyType: "all",
 		})
 	}
+	// Eşleşme bildirimi: yalnızca aktif + notify_me açık talepler
 	reqs, _ := h.requestRepo.List(repository.RequestFilter{OnlyActive: true})
 	var requests []svc.RequestForMatch
 	for _, req := range reqs {
 		if !req.NotifyMe { continue }
 		requests = append(requests, svc.RequestForMatch{
-			ID:     req.ID,
-			UserID: req.UserID,
-			Fields: req.Fields,
+			ID:         req.ID,
+			UserID:     req.UserID,
+			UserChatID: chatByUserID[req.UserID],
+			NotifyMe:   req.NotifyMe,
+			Fields:     req.Fields,
 		})
 	}
 	lm := svc.ListingForMatch{
-		ID:        listing.ID,
-		ListingNo: listing.ListingNo,
-		UserID:    listing.UserID,
-		OwnerID:   listing.UserID,
-		OwnerName: owner.FullName,
-		IsActive:  listing.IsActive,
-		Fields:    listing.Fields,
+		ID:          listing.ID,
+		ListingNo:   listing.ListingNo,
+		UserID:      listing.UserID,
+		OwnerID:     listing.UserID,
+		OwnerName:   owner.FullName,
+		OwnerChatID: chatByUserID[listing.UserID],
+		IsActive:    listing.IsActive,
+		Fields:      listing.Fields,
 	}
-	h.notifySvc.NotifyNewListing(lm, allUsers, requests)
+	h.notifySvc.NotifyNewListing(lm, allUsers, requests, notifyAll)
 }
 
 func intMin(a, b int) int { if a < b { return a }; return b }
