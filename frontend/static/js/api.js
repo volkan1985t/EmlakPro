@@ -196,6 +196,7 @@ const API = (() => {
   async function adminDeleteListing(id) { return request('DELETE', '/admin/listings/' + id); }
   async function adminGetRequests()     { return request('GET',    '/admin/requests'); }
   async function adminDeleteRequest(id) { return request('DELETE', '/admin/requests/' + id); }
+  async function deleteRequest(id)      { return request('DELETE', '/requests/' + id); }
   async function adminSetChatID(id, chatID) {
     return request('PATCH', '/admin/users/' + id + '/chatid', { telegram_chat_id: chatID });
   }
@@ -217,7 +218,7 @@ const API = (() => {
     getDashboard, getRecentActivities,
     adminGetUsers, adminCreateUser, adminToggleUser, adminDeleteUser, adminSetChatID,
     adminGetListings, adminDeleteListing,
-    adminGetRequests, adminDeleteRequest,
+    adminGetRequests, adminDeleteRequest, deleteRequest,
     getAdminSettings, updateAdminSettings,
     getTasks, getTask, createTask, updateTask, updateTaskStatus, deleteTask,
     addTaskComment, deleteTaskComment, uploadTaskImage, deleteTaskImage,

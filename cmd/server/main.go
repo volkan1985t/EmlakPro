@@ -165,6 +165,7 @@ func main() {
 			r.Put("/requests/{id}",          requestHandler.Update)
 			r.Patch("/requests/{id}/toggle", requestHandler.ToggleActive)
 			r.Patch("/requests/{id}/notify", requestHandler.ToggleNotify)
+			r.Delete("/requests/{id}",       requestHandler.Delete)
 
 			// Müşteriler (CRM)
 			r.Get("/customers",                              customerHandler.List)

@@ -23,7 +23,9 @@ type ListFilter struct {
 	ListingType  string
 	PropertyType string
 	District     string
+	Neighborhood string
 	Rooms        string
+	Zoning       string
 	Search       string
 	IsAdmin      bool
 }
@@ -89,6 +91,14 @@ func (r *ListingRepository) List(f ListFilter) ([]model.Listing, error) {
 	if f.Rooms != "" {
 		where = append(where, fmt.Sprintf("l.fields->>'rooms' = $%d", i))
 		args = append(args, f.Rooms); i++
+	}
+	if f.Neighborhood != "" {
+		where = append(where, fmt.Sprintf("l.fields->>'neighborhood' = $%d", i))
+		args = append(args, f.Neighborhood); i++
+	}
+	if f.Zoning != "" {
+		where = append(where, fmt.Sprintf("l.fields->>'zoning' = $%d", i))
+		args = append(args, f.Zoning); i++
 	}
 	if f.Search != "" {
 		where = append(where, fmt.Sprintf(

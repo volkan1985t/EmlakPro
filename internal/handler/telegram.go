@@ -121,6 +121,34 @@ func (h *BotHandler) handleMessage(msg *svc.TGMessage) {
 		return
 	}
 
+	// Reply keyboard buton metinleri → ilgili işleme yönlendir
+	switch text {
+	case "➕ İlan Gir":
+		h.tg.SendMessage(chatID, "➕ <b>İlan Gir</b>\nMülk tipi seçin:",
+			svc.PropertyTypeKeyboard("add_listing"))
+		return
+	case "🎯 Talep Gir":
+		h.startRequestWizard(chatID, user)
+		return
+	case "📋 İlanlar":
+		h.startMineFilter(chatID, user)
+		return
+	case "📂 Taleplerim":
+		h.sendMyRequests(chatID, user)
+		return
+	case "✅ Görevler":
+		h.sendMyTasks(chatID, user)
+		return
+	case "🔔 Bildirimler":
+		notifyOn := user.NotifyTelegram
+		status := "🔔 Aktif"
+		if !notifyOn { status = "🔕 Kapalı" }
+		h.tg.SendMessage(chatID,
+			fmt.Sprintf("🔔 <b>Bildirim Ayarları</b>\n\nDurum: %s", status),
+			svc.YesNoKeyboard("notify_on", "notify_off"))
+		return
+	}
+
 	// Komutlar
 	switch strings.ToLower(text) {
 	case "/menu", "menü", "menu":
@@ -177,12 +205,65 @@ func (h *BotHandler) handleCallback(cb *svc.TGCallback) {
 
 	// ── Benim İlanlarım ───────────────────────────────────────
 	case data == "menu_mine":
-		h.tg.SendMessage(chatID, "🏠 <b>Benim İlanlarım</b>\nMülk tipi seçin:",
-			svc.PropertyTypeKeyboard("mine"))
+		h.startMineFilter(chatID, user)
 
-	case strings.HasPrefix(data, "mine_"):
-		propType := strings.TrimPrefix(data, "mine_")
-		h.sendListings(chatID, user, propType, "", true)
+	// ── İlanlar drill-down filtresi ───────────────────────────
+	case strings.HasPrefix(data, "mf_scope_"):
+		scope := strings.TrimPrefix(data, "mf_scope_") // all | mine
+		h.mineFilterSet(chatID, user, "scope", scope)
+		h.tg.SendMessage(chatID, "🏷️ <b>İlan tipi</b> seçin:", svc.ListingTypeKeyboard("mf_lt"))
+
+	case strings.HasPrefix(data, "mf_lt_"):
+		val := strings.TrimPrefix(data, "mf_lt_")
+		h.mineFilterSet(chatID, user, "listing_type", val)
+		h.tg.SendMessage(chatID, "🏘️ <b>Mülk tipi</b> seçin:", svc.PropertyTypeKeyboard("mf_pt"))
+
+	case strings.HasPrefix(data, "mf_pt_"):
+		val := strings.TrimPrefix(data, "mf_pt_")
+		h.mineFilterSet(chatID, user, "property_type", val)
+		switch val {
+		case "Daire":
+			opts := append([]string{"Hepsi"}, h.cfg.RoomOptions...)
+			h.tg.SendMessage(chatID, "🛏️ <b>Oda sayısı</b> seçin:", svc.OptionsKeyboard(opts, "mf_rm"))
+		case "Arsa":
+			opts := append([]string{"Hepsi"}, h.cfg.ZoningOptions...)
+			h.tg.SendMessage(chatID, "📋 <b>İmar durumu</b> seçin:", svc.OptionsKeyboard(opts, "mf_zn"))
+		case "Villa", "Ticari":
+			opts := append([]string{"Hepsi"}, h.cfg.Districts...)
+			h.tg.SendMessage(chatID, "📍 <b>İlçe</b> seçin:", svc.OptionsKeyboard(opts, "mf_ds"))
+		default:
+			h.sendMineFilterResults(chatID, user)
+		}
+
+	case strings.HasPrefix(data, "mf_rm_"):
+		val := strings.TrimPrefix(data, "mf_rm_")
+		if val != "Hepsi" { h.mineFilterSet(chatID, user, "rooms", val) }
+		h.sendMineFilterResults(chatID, user)
+
+	case strings.HasPrefix(data, "mf_zn_"):
+		val := strings.TrimPrefix(data, "mf_zn_")
+		if val != "Hepsi" { h.mineFilterSet(chatID, user, "zoning", val) }
+		opts := append([]string{"Hepsi"}, h.cfg.Districts...)
+		h.tg.SendMessage(chatID, "📍 <b>İlçe</b> seçin:", svc.OptionsKeyboard(opts, "mf_ds"))
+
+	case strings.HasPrefix(data, "mf_ds_"):
+		val := strings.TrimPrefix(data, "mf_ds_")
+		if val != "Hepsi" { h.mineFilterSet(chatID, user, "district", val) }
+		sess := h.getSession(chatID)
+		pt := ""
+		if sess != nil && sess.Data != nil { pt = sess.Data["property_type"] }
+		// Ticari → ilçe yeterli; ilçe seçilmediyse mahalle sorma
+		if pt == "Ticari" || val == "Hepsi" {
+			h.sendMineFilterResults(chatID, user)
+		} else {
+			hoods := append([]string{"Hepsi"}, h.cfg.NeighborhoodsFor(val)...)
+			h.tg.SendMessage(chatID, "🏠 <b>Mahalle</b> seçin:", svc.OptionsKeyboard(hoods, "mf_nb"))
+		}
+
+	case strings.HasPrefix(data, "mf_nb_"):
+		val := strings.TrimPrefix(data, "mf_nb_")
+		if val != "Hepsi" { h.mineFilterSet(chatID, user, "neighborhood", val) }
+		h.sendMineFilterResults(chatID, user)
 
 	// ── İlan Gir ──────────────────────────────────────────────
 	case data == "menu_add_listing":
@@ -293,15 +374,29 @@ func (h *BotHandler) sendListings(chatID int64, user *model.User, propType, dist
 		IsAdmin:      user.Role == model.RoleAdmin,
 	}
 	if onlyMine { f.UserID = user.ID; f.OnlyMine = true } else { f.UserID = user.ID }
+	h.sendListingsFiltered(chatID, user, f)
+}
 
+// sendListingsFiltered — verilen filtreyle ilanları listeler
+func (h *BotHandler) sendListingsFiltered(chatID int64, user *model.User, f repository.ListFilter) {
 	listings, err := h.listingRepo.List(f)
 	if err != nil || len(listings) == 0 {
 		h.tg.SendMessage(chatID, "📭 Bu kriterlere uygun ilan bulunamadı.", nil)
 		return
 	}
 
-	title := fmt.Sprintf("📋 <b>%s İlanları", propType)
-	if district != "" && district != "Tümü" { title += " — " + district }
+	// Başlık — seçili filtreleri özetle
+	var parts []string
+	if f.ListingType != "" { parts = append(parts, f.ListingType) }
+	if f.PropertyType != "" { parts = append(parts, f.PropertyType) }
+	if f.Rooms != "" { parts = append(parts, f.Rooms) }
+	if f.Zoning != "" { parts = append(parts, f.Zoning) }
+	if f.District != "" { parts = append(parts, f.District) }
+	if f.Neighborhood != "" { parts = append(parts, f.Neighborhood) }
+	baslik := "Tüm İlanlar"
+	if f.OnlyMine { baslik = "İlanlarım" }
+	title := "📋 <b>" + baslik
+	if len(parts) > 0 { title += " — " + strings.Join(parts, " · ") }
 	title += fmt.Sprintf("</b>\n%d ilan bulundu:\n\n", len(listings))
 
 	h.tg.SendMessage(chatID, title, nil)
@@ -341,6 +436,51 @@ func (h *BotHandler) sendListings(chatID int64, user *model.User, propType, dist
 		)
 		h.tg.SendMessage(chatID, ilanText, nil)
 	}
+}
+
+// startMineFilter — İlanlarım drill-down filtresini başlatır
+func (h *BotHandler) startMineFilter(chatID int64, user *model.User) {
+	h.setSession(chatID, user.ID, "mine_filter", map[string]string{})
+	kb := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{
+		{{Text: "🌐 Tüm İlanlar", CallbackData: "mf_scope_all"}},
+		{{Text: "👤 Benim İlanlarım", CallbackData: "mf_scope_mine"}},
+		{{Text: "❌ İptal", CallbackData: "wizard_cancel"}},
+	}}
+	h.tg.SendMessage(chatID, "📋 <b>İlanlar</b>\nHangi ilanları görmek istersiniz?", kb)
+}
+
+// mineFilterSet — session'daki filtreye bir alan ekler
+func (h *BotHandler) mineFilterSet(chatID int64, user *model.User, key, val string) {
+	sess := h.getSession(chatID)
+	data := map[string]string{}
+	if sess != nil && sess.Data != nil {
+		data = sess.Data
+	}
+	data[key] = val
+	h.setSession(chatID, user.ID, "mine_filter", data)
+}
+
+// sendMineFilterResults — biriken filtreyle ilanları listeler
+func (h *BotHandler) sendMineFilterResults(chatID int64, user *model.User) {
+	sess := h.getSession(chatID)
+	data := map[string]string{}
+	if sess != nil && sess.Data != nil {
+		data = sess.Data
+	}
+	onlyMine := data["scope"] != "all" // varsayılan: benim ilanlarım
+	f := repository.ListFilter{
+		UserID:       user.ID,
+		OnlyMine:     onlyMine,
+		IsAdmin:      user.Role == model.RoleAdmin,
+		ListingType:  data["listing_type"],
+		PropertyType: data["property_type"],
+		District:     data["district"],
+		Neighborhood: data["neighborhood"],
+		Rooms:        data["rooms"],
+		Zoning:       data["zoning"],
+	}
+	h.clearSession(chatID)
+	h.sendListingsFiltered(chatID, user, f)
 }
 
 func formatTGPrice(s string) string {
@@ -1067,7 +1207,8 @@ func (h *BotHandler) customerPickerKeyboard(customers []model.Customer) *svc.TGI
 }
 
 func (h *BotHandler) sendMainMenu(chatID int64, intro string) {
-	h.tg.SendMessage(chatID, intro, svc.MainMenuKeyboard())
+	// Kalıcı alt menü (reply keyboard) — ana navigasyon hep görünür
+	h.tg.SendMessage(chatID, intro, svc.MainReplyKeyboard())
 }
 
 func (h *BotHandler) districtKeyboardWithAll(prefix string) *svc.TGInlineKeyboard {

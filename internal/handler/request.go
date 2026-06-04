@@ -113,6 +113,32 @@ func (h *RequestHandler) Update(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, existing)
 }
 
+// DELETE /api/requests/{id} — admin veya talep sahibi silebilir
+func (h *RequestHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		jsonErr(w, "Geçersiz ID", http.StatusBadRequest)
+		return
+	}
+	userID, _ := middleware.GetUserID(r.Context())
+	isAdmin := middleware.IsAdmin(r.Context())
+
+	existing, err := h.requestRepo.GetByID(id)
+	if err != nil || existing == nil {
+		jsonErr(w, "Talep bulunamadı", http.StatusNotFound)
+		return
+	}
+	if !isAdmin && existing.UserID != userID {
+		jsonErr(w, "Bu talebi silme yetkiniz yok", http.StatusForbidden)
+		return
+	}
+	if err := h.requestRepo.Delete(id); err != nil {
+		jsonErr(w, "Talep silinemedi", http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]bool{"deleted": true})
+}
+
 // PATCH /api/requests/{id}/toggle
 func (h *RequestHandler) ToggleActive(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)

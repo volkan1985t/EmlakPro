@@ -1313,7 +1313,8 @@ async function doDeleteRequest(id, e) {
   e.stopPropagation();
   if (!confirm('Bu talebi silmek istediğinizden emin misiniz?')) return;
   try {
-    await API.adminDeleteRequest(id);
+    // Backend yetkiyi kontrol eder: admin veya talep sahibi silebilir
+    await API.deleteRequest(id);
     await loadRequests();
     showToast('Talep silindi.');
   } catch(err) { showToast(err.message, 'error'); }

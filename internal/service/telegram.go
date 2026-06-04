@@ -53,6 +53,30 @@ type TGInlineButton struct {
 	CallbackData string `json:"callback_data"`
 }
 
+// Reply Keyboard — yazı kutusu altındaki kalıcı butonlar
+type TGReplyKeyboard struct {
+	Keyboard        [][]TGKeyboardButton `json:"keyboard"`
+	ResizeKeyboard  bool                 `json:"resize_keyboard"`
+	IsPersistent    bool                 `json:"is_persistent"`
+}
+
+type TGKeyboardButton struct {
+	Text string `json:"text"`
+}
+
+// MainReplyKeyboard — ana navigasyon (kalıcı alt menü)
+func MainReplyKeyboard() *TGReplyKeyboard {
+	return &TGReplyKeyboard{
+		ResizeKeyboard: true,
+		IsPersistent:   false,
+		Keyboard: [][]TGKeyboardButton{
+			{{Text: "➕ İlan Gir"}, {Text: "🎯 Talep Gir"}},
+			{{Text: "📋 İlanlar"}, {Text: "📂 Taleplerim"}},
+			{{Text: "✅ Görevler"}, {Text: "🔔 Bildirimler"}},
+		},
+	}
+}
+
 // ── TelegramService ───────────────────────────────────────────
 
 type TelegramService struct {
