@@ -46,6 +46,11 @@ func (h *CustomerHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name == "" { jsonErr(w, "Müşteri adı zorunludur", http.StatusBadRequest); return }
 
+	// Mükerrer kontrolü — aynı danışmanda isim VEYA telefon eşleşmesi
+	if dup, _ := h.customerRepo.FindDuplicate(userID, req.Name, req.Phone); dup != nil {
+		jsonErr(w, "Bu müşteri zaten kayıtlı: "+dup.Name, http.StatusConflict); return
+	}
+
 	c := &model.Customer{
 		UserID: userID,
 		Name:   req.Name,

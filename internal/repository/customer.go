@@ -75,6 +75,51 @@ func (r *CustomerRepository) GetByID(id int64) (*model.Customer, error) {
 	return &c, nil
 }
 
+// FindDuplicate — aynı danışmanın kayıtlarında isim VEYA telefon eşleşmesi arar.
+// Bulursa eşleşen müşteriyi, bulamazsa nil döner.
+func (r *CustomerRepository) FindDuplicate(userID int64, name, phone string) (*model.Customer, error) {
+	name = strings.TrimSpace(name)
+	phone = strings.TrimSpace(phone)
+	// Telefondan rakam-dışı karakterleri arındırarak karşılaştır
+	digits := func(s string) string {
+		var b strings.Builder
+		for _, ch := range s {
+			if ch >= '0' && ch <= '9' { b.WriteRune(ch) }
+		}
+		return b.String()
+	}
+	phoneDigits := digits(phone)
+
+	conds := []string{}
+	args := []interface{}{userID}
+	i := 2
+	if name != "" {
+		conds = append(conds, fmt.Sprintf("LOWER(TRIM(c.name)) = LOWER(TRIM($%d))", i))
+		args = append(args, name); i++
+	}
+	if phoneDigits != "" {
+		conds = append(conds, fmt.Sprintf("regexp_replace(COALESCE(c.phone,''), '[^0-9]', '', 'g') = $%d", i))
+		args = append(args, phoneDigits); i++
+	}
+	if len(conds) == 0 {
+		return nil, nil
+	}
+	query := fmt.Sprintf(`
+		SELECT c.id, c.user_id, c.name, c.phone, c.email, COALESCE(c.notes,''), c.is_active, c.created_at, c.updated_at
+		FROM customers c
+		WHERE c.user_id = $1 AND (%s)
+		LIMIT 1`, strings.Join(conds, " OR "))
+
+	var cust model.Customer
+	err := r.db.QueryRow(query, args...).Scan(
+		&cust.ID, &cust.UserID, &cust.Name, &cust.Phone, &cust.Email,
+		&cust.Notes, &cust.IsActive, &cust.CreatedAt, &cust.UpdatedAt)
+	if err != nil {
+		return nil, nil // bulunamadı (sql.ErrNoRows dahil) → mükerrer yok
+	}
+	return &cust, nil
+}
+
 func (r *CustomerRepository) Create(c *model.Customer) error {
 	return r.db.QueryRow(`
 		INSERT INTO customers (user_id, name, phone, email, source, notes)
