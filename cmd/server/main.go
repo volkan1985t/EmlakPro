@@ -54,6 +54,7 @@ func main() {
 	requestRepo  := repository.NewRequestRepository(db)
 	customerRepo := repository.NewCustomerRepository(db)
 	taskRepo     := repository.NewTaskRepository(db)
+	interestRepo := repository.NewInterestRepository(db)
 
 	tokenSvc := auth.NewTokenService(
 		cfg.Auth.JWTSecret,
@@ -63,7 +64,7 @@ func main() {
 	imageSvc    := service.NewImageService(cfg)
 	telegramSvc := service.NewTelegramService(&cfg.Telegram, userRepo)
 	notifySvc   := service.NewNotificationService(telegramSvc)
-	botHandler  := handler.NewBotHandler(cfg, telegramSvc, imageSvc, notifySvc, db, userRepo, listingRepo, requestRepo, taskRepo, customerRepo)
+	botHandler  := handler.NewBotHandler(cfg, telegramSvc, imageSvc, notifySvc, db, userRepo, listingRepo, requestRepo, taskRepo, customerRepo, interestRepo)
 	telegramSvc.SetUpdateHandler(botHandler.Handle)
 	telegramSvc.StartPolling()
 
@@ -93,6 +94,7 @@ func main() {
 	customerHandler  := handler.NewCustomerHandler(cfg, customerRepo, listingRepo, imageSvc)
 	dashboardHandler := handler.NewDashboardHandler(db)
 	taskHandler      := handler.NewTaskHandler(taskRepo, imageSvc, telegramSvc)
+	interestHandler  := handler.NewInterestHandler(cfg, interestRepo)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -176,6 +178,13 @@ func main() {
 			r.Get("/customers/{id}/listings",                customerHandler.GetListings)
 			r.Post("/customers/{id}/listings",               customerHandler.LinkListing)
 			r.Delete("/customers/{id}/listings/{listingID}", customerHandler.UnlinkListing)
+
+			// İlan İlgileri (lead/teklif takibi)
+			r.Get("/interests",         interestHandler.List)
+			r.Get("/interests/counts",  interestHandler.Counts)
+			r.Post("/interests",        interestHandler.Create)
+			r.Put("/interests/{id}",    interestHandler.Update)
+			r.Delete("/interests/{id}", interestHandler.Delete)
 
 			// Dashboard
 			r.Get("/dashboard", dashboardHandler.Stats)

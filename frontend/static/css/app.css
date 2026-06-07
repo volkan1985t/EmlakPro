@@ -2472,3 +2472,31 @@ body {
   gap: 3px;
 }
 .badge-incomplete i { font-size: 13px; }
+
+/* ═══ İLAN İLGİLERİ (lead/teklif) ═══ */
+.ilgi-banner{align-items:center;gap:8px;background:#fee2e2;color:#b91c1c;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:14px}
+.ilgi-board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:start}
+.ilgi-col{background:#f8fafc;border:1px solid #eef0f3;border-radius:12px;padding:10px}
+.ilgi-col-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-weight:600;font-size:14px;color:var(--navy,#1e293b)}
+.ilgi-count{font-size:12px;font-weight:500;color:#64748b;background:#eef0f3;border-radius:10px;padding:1px 9px}
+.ilgi-col-body{display:flex;flex-direction:column;gap:8px;min-height:40px}
+.ilgi-empty{color:#cbd5e1;font-size:13px;text-align:center;margin:6px 0}
+.ilgi-card{background:#fff;border:1px solid #e8eaed;border-radius:10px;padding:10px;cursor:pointer;transition:box-shadow .15s,transform .15s}
+.ilgi-card:hover{box-shadow:0 3px 12px rgba(0,0,0,.08);transform:translateY(-1px)}
+.ilgi-card-name{font-weight:600;font-size:14px;color:#1e293b}
+.ilgi-card-listing{font-size:12px;color:#64748b;margin:2px 0 8px}
+.ilgi-offer{font-size:13px;font-weight:600;color:#0d9488;margin-top:8px}
+.ilgi-date{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#64748b;margin-top:8px}
+.ilgi-date.overdue{color:#dc2626;font-weight:600}
+.ilgi-tip{display:inline-block;font-size:11px;font-weight:600;border-radius:5px;padding:2px 7px}
+.tip-bilgi{background:#e0f2fe;color:#0369a1}
+.tip-teklif{background:#fef3c7;color:#92400e}
+.tip-goruntuleme{background:#d1fae5;color:#065f46}
+.tip-belge{background:#ede9fe;color:#5b21b6}
+.tip-geri{background:#f1f5f9;color:#475569}
+.tip-baska{background:#ffe4e6;color:#9f1239}
+@media(max-width:768px){.ilgi-board{grid-template-columns:1fr;gap:14px}}
+
+/* Header kullanıcı adı */
+.hdr-username{font-size:14px;font-weight:600;color:var(--navy,#1e293b);margin-right:4px;white-space:nowrap}
+@media(max-width:768px){.hdr-username{display:none}}

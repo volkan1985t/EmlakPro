@@ -152,6 +152,16 @@ const API = (() => {
   async function toggleCustomer(id)       { return request('PATCH', '/customers/' + id + '/toggle'); }
   async function deleteCustomer(id)       { return request('DELETE', '/customers/' + id); }
   async function getCustomerListings(id)  { return request('GET', '/customers/' + id + '/listings'); }
+
+  // -- İlan İlgileri (lead/teklif) --
+  async function getInterests(params = {}) {
+    const q = new URLSearchParams(params).toString();
+    return request('GET', '/interests' + (q ? '?' + q : ''));
+  }
+  async function getInterestCounts()      { return request('GET', '/interests/counts'); }
+  async function createInterest(data)     { return request('POST', '/interests', data); }
+  async function updateInterest(id, data) { return request('PUT', '/interests/' + id, data); }
+  async function deleteInterest(id)       { return request('DELETE', '/interests/' + id); }
   async function linkListing(customerId, listingId, note) {
     return request('POST', '/customers/' + customerId + '/listings', { listing_id: listingId, note: note||'' });
   }
@@ -215,6 +225,7 @@ const API = (() => {
     getRequests, createRequest, updateRequest, toggleRequest, toggleRequestNotify,
     getCustomers, createCustomer, updateCustomer, toggleCustomer, deleteCustomer,
     getCustomerListings, linkListing, unlinkListing,
+    getInterests, getInterestCounts, createInterest, updateInterest, deleteInterest,
     getDashboard, getRecentActivities,
     adminGetUsers, adminCreateUser, adminToggleUser, adminDeleteUser, adminSetChatID,
     adminGetListings, adminDeleteListing,

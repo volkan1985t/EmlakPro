@@ -16,7 +16,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=Playfair+Display:ital,wght@0,700;1,700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.0.0/dist/tabler-icons.min.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <link rel="stylesheet" href="/static/css/app.css?v=202606022020">
+  <link rel="stylesheet" href="/static/css/app.css?v=202606061634">
 </head>
 <body>
 
@@ -56,6 +56,7 @@
     <nav class="nav">
       <button class="nav-btn active" data-page="ilanlar">📋 <span class="nav-btn-text">Portföy</span></button>
       <button class="nav-btn" data-page="talepler">🎯 <span class="nav-btn-text">Talepler</span></button>
+      <button class="nav-btn" data-page="ilgiler">📞 <span class="nav-btn-text">İlgiler</span></button>
       <button class="nav-btn" data-page="musteriler">👥 <span class="nav-btn-text">Müşteriler</span></button>
       <button class="nav-btn" data-page="gorevler">📝 <span class="nav-btn-text">Görevler</span></button>
       <button class="nav-btn" data-page="dashboard">📊 <span class="nav-btn-text">Dashboard</span></button>
@@ -63,7 +64,7 @@
       <button class="nav-btn admin-only" data-page="admin" style="display:none">🔧 <span class="nav-btn-text">Admin</span></button>
     </nav>
     <div class="hdr-right">
-      <button class="btn btn-gold btn-sm" id="yeni-ilan-btn">+ İlan Ekle</button>
+      <span class="hdr-username" id="hdr-username"></span>
       <div class="avatar" id="user-avatar" title="">A</div>
       <button class="btn btn-outline btn-sm" id="logout-btn">Çıkış</button>
     </div>
@@ -81,6 +82,7 @@
       <span class="bottom-nav-icon">🎯</span>
       <span class="bottom-nav-label">Talepler</span>
     </button>
+    <button class="bottom-nav-btn" data-page="ilgiler"><span style="font-size:18px">📞</span><span class="bottom-nav-text">İlgiler</span></button>
     <button class="bottom-nav-btn" data-page="musteriler">
       <span class="bottom-nav-icon">👥</span>
       <span class="bottom-nav-label">Müşteriler</span>
@@ -117,6 +119,7 @@
         <label class="mine-check">
           <input type="checkbox" id="filter-mine"> Benim İlanlarım
         </label>
+        <button class="btn btn-gold btn-sm" id="yeni-ilan-btn" style="margin-left:auto">+ İlan Ekle</button>
       </div>
       <div class="grid" id="ilan-grid"></div>
       <div class="empty-state" id="ilan-empty" style="display:none">
@@ -138,6 +141,23 @@
         <button class="btn btn-gold btn-sm" style="margin-left:auto" id="yeni-talep-btn">+ Talep Ekle</button>
       </div>
       <div class="talep-list" id="talep-list"></div>
+    </div>
+
+    <div class="page" id="page-ilgiler">
+      <div class="toolbar">
+        <select id="ilgi-tip-filter"><option value="">Tüm Tipler</option>
+          <option value="bilgi">Bilgi talebi</option>
+          <option value="teklif">Fiyat teklifi</option>
+          <option value="goruntuleme">Görüntüleme</option>
+          <option value="belge">Resim / belge</option>
+          <option value="geri_arama">Geri arama</option>
+          <option value="baska_portfoy">Başka portföy</option>
+        </select>
+        <button class="toolbar-toggle" id="ilgi-bugun-btn" onclick="ilgiToggleToday(this)">📅 Bugün Aranacaklar</button>
+        <button class="btn btn-gold btn-sm" style="margin-left:auto" id="yeni-ilgi-btn">+ Yeni İlgi</button>
+      </div>
+      <div id="ilgi-bugun-banner" class="ilgi-banner" style="display:none"></div>
+      <div class="ilgi-board" id="ilgi-board"></div>
     </div>
 
     <!-- MÜŞTERİLER (CRM) -->
@@ -579,6 +599,85 @@
   </div>
 </div>
 
+<!-- İLGİ FORM MODAL (create/edit) -->
+<div class="overlay" id="ilgi-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="ilgi-modal-title">Yeni İlgi</h3>
+      <button class="close-btn" id="close-ilgi-modal">×</button>
+    </div>
+    <div class="form-group">
+      <label>İlgi Tipi <span class="req">*</span></label>
+      <select id="i-type">
+        <option value="bilgi">Bilgi talebi</option>
+        <option value="teklif">Fiyat teklifi</option>
+        <option value="goruntuleme">Görüntüleme talebi</option>
+        <option value="belge">Resim / belge talebi</option>
+        <option value="geri_arama">Geri arama</option>
+        <option value="baska_portfoy">Başka portföy arıyor</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>İlan (portföy)</label>
+      <select id="i-listing"><option value="">— İlansız / genel —</option></select>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Alıcı adı</label><input id="i-buyer-name" type="text" placeholder="Ad Soyad"></div>
+      <div class="form-group"><label>Telefon</label><input id="i-buyer-phone" type="text" placeholder="0532..."></div>
+    </div>
+    <div class="form-group" id="i-offer-group" style="display:none">
+      <label>Teklif tutarı</label><input id="i-offer" type="text" placeholder="4.200.000 ₺">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Durum</label>
+        <select id="i-status">
+          <option value="yeni">Yeni</option>
+          <option value="gorusuluyor">Görüşülüyor</option>
+          <option value="pazarlik">Pazarlık</option>
+          <option value="sonuc">Sonuç</option>
+        </select>
+      </div>
+      <div class="form-group" id="i-outcome-group" style="display:none">
+        <label>Sonuç</label>
+        <select id="i-outcome">
+          <option value="">—</option>
+          <option value="kazanildi">Kazanıldı</option>
+          <option value="kaybedildi">Kaybedildi</option>
+          <option value="ilgilenmedi">İlgilenmedi</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Sonraki adım</label><input id="i-next-step" type="text" placeholder="Maliki ara..."></div>
+      <div class="form-group"><label>Sonraki tarih</label><input id="i-next-date" type="date"></div>
+    </div>
+    <div class="form-group"><label>Notlar</label><textarea id="i-notes" rows="2" placeholder="Görüşme notu..."></textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="ilgi-musteri-btn">👤 Müşteri Olarak Ekle</button>
+      <button class="btn btn-outline" id="ilgi-iptal-btn">İptal</button>
+      <button class="btn btn-gold" id="ilgi-kaydet-btn">💾 Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<!-- İLGİ → GÖREV PAKETİ MODAL -->
+<div class="overlay" id="ilgi-task-overlay">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <h3>🎉 Kazanıldı! Görev paketi</h3>
+      <button class="close-btn" id="close-ilgi-task-modal">×</button>
+    </div>
+    <p style="color:#475569;font-size:14px;margin:0 0 14px">Bu işlem için ilgili görevler otomatik açılsın mı? İşlem türünü seçin:</p>
+    <div id="ilgi-task-hint" class="muted" style="font-size:13px;margin-bottom:10px"></div>
+    <div class="modal-footer" style="flex-wrap:wrap;gap:8px">
+      <button class="btn btn-outline" id="ilgi-task-iptal">Vazgeç</button>
+      <button class="btn btn-blue" id="ilgi-task-kiralama">🔑 Kiralama Paketi</button>
+      <button class="btn btn-gold" id="ilgi-task-satis">🏷️ Satış Paketi</button>
+    </div>
+  </div>
+</div>
+
 <!-- GÖREV FORM MODAL (create/edit) -->
 <div class="overlay" id="gorev-overlay">
   <div class="modal">
@@ -711,8 +810,8 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/static/js/api.js?v=202606022020"></script>
-<script src="/static/js/app.js?v=202606022020"></script>
+<script src="/static/js/api.js?v=202606061634"></script>
+<script src="/static/js/app.js?v=202606061634"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

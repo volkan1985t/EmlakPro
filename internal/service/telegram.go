@@ -32,6 +32,16 @@ type TGMessage struct {
 	Chat      TGChat         `json:"chat"`
 	Text      string         `json:"text"`
 	Photo     []TGPhotoSize  `json:"photo"`  // en büyük boyut son eleman
+	Contact   *TGContact     `json:"contact"` // rehberden paylaşılan kişi
+}
+
+// TGContact — Telegram'dan paylaşılan kişi (rehber paylaşımı)
+type TGContact struct {
+	PhoneNumber string `json:"phone_number"`
+	FirstName   string `json:"first_name"`
+	LastName    string `json:"last_name"`
+	UserID      int64  `json:"user_id"`
+	VCard       string `json:"vcard"`
 }
 
 type TGChat struct {
@@ -70,9 +80,9 @@ func MainReplyKeyboard() *TGReplyKeyboard {
 		ResizeKeyboard: true,
 		IsPersistent:   false,
 		Keyboard: [][]TGKeyboardButton{
-			{{Text: "➕ İlan Gir"}, {Text: "🎯 Talep Gir"}},
-			{{Text: "📋 İlanlar"}, {Text: "📂 Taleplerim"}},
-			{{Text: "✅ Görevler"}, {Text: "🔔 Bildirimler"}},
+			{{Text: "🏠 İlan Ekle / İlanlar"}, {Text: "🎯 Talep Ekle / Talepler"}},
+			{{Text: "👥 Müşteri Ekle / Müşteriler"}, {Text: "✅ Görev Ekle / Görevler"}},
+			{{Text: "📞 İlgi Ekle / İlgiler"}, {Text: "⚙️ Ayarlar / Bildirimler"}},
 		},
 	}
 }
@@ -191,6 +201,11 @@ func (s *TelegramService) SendNotification(chatID int64, text string) error {
 // SendMessage sends a message with an optional inline keyboard.
 func (s *TelegramService) SendMessage(chatID int64, text string, kb interface{}) {
 	s.sendRaw(chatID, text, kb)
+}
+
+// SendSeparator — yeni bir kullanıcı isteğinin cevabının başladığını gösteren ayraç şeridi
+func (s *TelegramService) SendSeparator(chatID int64) {
+	s.sendRaw(chatID, "➖➖➖➖➖➖➖➖➖➖", nil)
 }
 
 // AnswerCallback — callback query'ye cevap ver (spinner'ı temizler, zorunlu)

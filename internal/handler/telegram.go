@@ -28,6 +28,7 @@ type BotHandler struct {
 	requestRepo  *repository.RequestRepository
 	taskRepo     *repository.TaskRepository
 	customerRepo *repository.CustomerRepository
+	interestRepo *repository.InterestRepository
 	db           *sql.DB
 }
 
@@ -42,10 +43,11 @@ func NewBotHandler(
 	requestRepo  *repository.RequestRepository,
 	taskRepo     *repository.TaskRepository,
 	customerRepo *repository.CustomerRepository,
+	interestRepo *repository.InterestRepository,
 ) *BotHandler {
 	return &BotHandler{cfg: cfg, tg: tg, imageSvc: imageSvc, notifySvc: notifySvc, db: db,
 		userRepo: userRepo, listingRepo: listingRepo, requestRepo: requestRepo,
-		taskRepo: taskRepo, customerRepo: customerRepo}
+		taskRepo: taskRepo, customerRepo: customerRepo, interestRepo: interestRepo}
 }
 
 // Handle — gelen her update'i işler
@@ -103,6 +105,11 @@ func (h *BotHandler) handleMessage(msg *svc.TGMessage) {
 		return
 	}
 
+	// Yeni işlem başlangıcında ayraç şeridi (wizard ortasında değilse)
+	if s := h.getSession(chatID); s == nil || s.Step == "" || s.Step == "idle" {
+		h.tg.SendSeparator(chatID)
+	}
+
 	// Fotoğraf geldi mi?
 	if len(msg.Photo) > 0 {
 		session := h.getSession(chatID)
@@ -110,42 +117,59 @@ func (h *BotHandler) handleMessage(msg *svc.TGMessage) {
 			h.handleListingPhoto(msg, user, session)
 			return
 		}
-		h.tg.SendMessage(chatID, "📸 Fotoğraf alındı ama aktif bir ilan girişi yok. Önce ➕ İlan Gir seçin.", nil)
+		h.tg.SendMessage(chatID, "📸 Fotoğraf alındı ama aktif bir ilan girişi yok. Önce '🏠 İlan Ekle / İlanlar' → Yeni İlan seçin.", nil)
 		return
 	}
 
-	// Aktif session var mı?
-	session := h.getSession(chatID)
-	if session != nil && session.Step != "idle" {
-		h.handleSessionStep(msg, user, session, session.Data)
+	// Rehberden kişi paylaşıldı mı? → ne yapılacağını sor
+	if msg.Contact != nil {
+		h.handleSharedContact(chatID, user, msg.Contact)
 		return
+	}
+
+	// Reply keyboard ana buton metni mi? Öyleyse yarım kalan session'ı iptal et.
+	// (Aksi halde takılı bir session buton metnini yutar.)
+	mainButtons := map[string]bool{
+		"🏠 İlan Ekle / İlanlar": true, "🎯 Talep Ekle / Talepler": true,
+		"👥 Müşteri Ekle / Müşteriler": true, "✅ Görev Ekle / Görevler": true,
+		"📞 İlgi Ekle / İlgiler": true, "⚙️ Ayarlar / Bildirimler": true,
+	}
+	if mainButtons[text] {
+		h.clearSession(chatID)
+	} else {
+		// Aktif session var mı? (sadece ana buton DEĞİLSE session'a yönlendir)
+		session := h.getSession(chatID)
+		if session != nil && session.Step != "idle" {
+			h.handleSessionStep(msg, user, session, session.Data)
+			return
+		}
 	}
 
 	// Reply keyboard buton metinleri → ilgili işleme yönlendir
 	switch text {
-	case "➕ İlan Gir":
-		h.tg.SendMessage(chatID, "➕ <b>İlan Gir</b>\nMülk tipi seçin:",
-			svc.PropertyTypeKeyboard("add_listing"))
+	case "🏠 İlan Ekle / İlanlar":
+		h.sendPairMenu(chatID, "🏠 <b>İlan</b>\nNe yapmak istersiniz?",
+			"➕ Yeni İlan", "menu_add_listing", "📋 İlanlar", "menu_mine")
 		return
-	case "🎯 Talep Gir":
-		h.startRequestWizard(chatID, user)
+	case "🎯 Talep Ekle / Talepler":
+		h.sendPairMenu(chatID, "🎯 <b>Talep</b>\nNe yapmak istersiniz?",
+			"➕ Talep Ekle", "menu_add_request", "📂 Talepler", "menu_my_requests")
 		return
-	case "📋 İlanlar":
-		h.startMineFilter(chatID, user)
+	case "👥 Müşteri Ekle / Müşteriler":
+		h.sendPairMenu(chatID, "👥 <b>Müşteri</b>\nNe yapmak istersiniz?",
+			"➕ Müşteri Ekle", "cust_add", "📋 Müşterilerim", "cust_list")
 		return
-	case "📂 Taleplerim":
-		h.sendMyRequests(chatID, user)
+	case "✅ Görev Ekle / Görevler":
+		h.sendPairMenu(chatID, "✅ <b>Görev</b>\nNe yapmak istersiniz?",
+			"➕ Görev Ekle", "task_add_soon", "📋 Görevler", "menu_tasks")
 		return
-	case "✅ Görevler":
-		h.sendMyTasks(chatID, user)
+	case "📞 İlgi Ekle / İlgiler":
+		h.sendPairMenu(chatID, "📞 <b>İlan İlgileri</b>\nNe yapmak istersiniz?",
+			"➕ İlgi Ekle", "int_add", "📋 İlgilerim", "int_list")
 		return
-	case "🔔 Bildirimler":
-		notifyOn := user.NotifyTelegram
-		status := "🔔 Aktif"
-		if !notifyOn { status = "🔕 Kapalı" }
-		h.tg.SendMessage(chatID,
-			fmt.Sprintf("🔔 <b>Bildirim Ayarları</b>\n\nDurum: %s", status),
-			svc.YesNoKeyboard("notify_on", "notify_off"))
+	case "⚙️ Ayarlar / Bildirimler":
+		h.sendPairMenu(chatID, "⚙️ <b>Ayarlar</b>\nNe yapmak istersiniz?",
+			"⚙️ Ayarlar", "settings_soon", "🔔 Bildirimler", "menu_notify")
 		return
 	}
 
@@ -173,6 +197,11 @@ func (h *BotHandler) handleCallback(cb *svc.TGCallback) {
 	if user == nil {
 		h.tg.SendMessage(chatID, "⛔ Yetkisiz erişim.", nil)
 		return
+	}
+
+	// Yeni işlem başlangıcında ayraç şeridi (wizard ortasında değilse)
+	if s := h.getSession(chatID); s == nil || s.Step == "" || s.Step == "idle" {
+		h.tg.SendSeparator(chatID)
 	}
 
 	// Ana menüye dön
@@ -318,7 +347,137 @@ func (h *BotHandler) handleCallback(cb *svc.TGCallback) {
 	case data == "menu_tasks":
 		h.sendMyTasks(chatID, user)
 
+	// ── Müşteriler ────────────────────────────────────────────
+	case data == "cust_add":
+		h.setSession(chatID, user.ID, "cust_add", map[string]string{"_cstep": "name"})
+		h.tg.SendMessage(chatID, "➕ <b>Yeni Müşteri</b>\nMüşteri adını yazın:", nil)
+
+	case data == "cust_list":
+		h.sendCustomerList(chatID, user, "")
+
+	case data == "cust_search":
+		h.setSession(chatID, user.ID, "cust_search", map[string]string{})
+		h.tg.SendMessage(chatID, "🔍 <b>Müşteri Ara</b>\nAd veya telefonun ilk hanelerini yazın:", nil)
+
+	case strings.HasPrefix(data, "cust_del_"):
+		idStr := strings.TrimPrefix(data, "cust_del_")
+		cid, _ := strconv.ParseInt(idStr, 10, 64)
+		cu, _ := h.customerRepo.GetByID(cid)
+		if cu == nil || cu.UserID != user.ID {
+			h.tg.SendMessage(chatID, "⚠️ Müşteri bulunamadı veya yetkiniz yok.", nil)
+			break
+		}
+		kb := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{
+			{{Text: "🗑 Evet, sil", CallbackData: fmt.Sprintf("cust_delyes_%d", cid)}},
+			{{Text: "↩️ Vazgeç", CallbackData: "cust_delno"}},
+		}}
+		h.tg.SendMessage(chatID, fmt.Sprintf("⚠️ <b>%s</b> silinsin mi?", cu.Name), kb)
+
+	case strings.HasPrefix(data, "cust_delyes_"):
+		idStr := strings.TrimPrefix(data, "cust_delyes_")
+		cid, _ := strconv.ParseInt(idStr, 10, 64)
+		cu, _ := h.customerRepo.GetByID(cid)
+		if cu == nil || cu.UserID != user.ID {
+			h.tg.SendMessage(chatID, "⚠️ Müşteri bulunamadı veya yetkiniz yok.", nil)
+			break
+		}
+		if err := h.customerRepo.Delete(cid); err != nil {
+			h.tg.SendMessage(chatID, "❌ Silinemedi: "+err.Error(), nil)
+		} else {
+			h.tg.SendMessage(chatID, fmt.Sprintf("✅ <b>%s</b> silindi.", cu.Name), nil)
+		}
+
+	case data == "cust_delno":
+		h.tg.SendMessage(chatID, "↩️ İşlem iptal edildi.", nil)
+
+	// ── Paylaşılan kişi (rehberden) ───────────────────────────
+	case data == "sc_cancel":
+		h.clearSession(chatID)
+		h.tg.SendMessage(chatID, "↩️ İptal edildi.", nil)
+
+	case data == "sc_customer":
+		s := h.getSession(chatID)
+		name, phone, email := "", "", ""
+		if s != nil && s.Data != nil {
+			name = s.Data["shared_name"]; phone = s.Data["shared_phone"]; email = s.Data["shared_email"]
+		}
+		h.clearSession(chatID)
+		if name == "" { name = phone }
+		if dup, _ := h.customerRepo.FindDuplicate(user.ID, name, phone); dup != nil {
+			h.tg.SendMessage(chatID, fmt.Sprintf("ℹ️ <b>%s</b> zaten kayıtlı.", dup.Name), nil)
+			break
+		}
+		newC := &model.Customer{UserID: user.ID, Name: name, Phone: phone, Email: email}
+		if err := h.customerRepo.Create(newC); err != nil {
+			h.tg.SendMessage(chatID, "❌ Müşteri eklenemedi: "+err.Error(), nil)
+		} else {
+			h.tg.SendMessage(chatID, fmt.Sprintf("✅ <b>%s</b> müşteri olarak kaydedildi.", name), nil)
+		}
+
+	case data == "sc_request":
+		s := h.getSession(chatID)
+		name, phone := "", ""
+		if s != nil && s.Data != nil { name = s.Data["shared_name"]; phone = s.Data["shared_phone"] }
+		// Talep wizard'ı başlat, müşteri adımını atla (önceden dolu)
+		d := map[string]string{"_step_idx": "1", "client_name": name, "phone": phone}
+		h.setSession(chatID, user.ID, "request_wizard", d)
+		h.tg.SendMessage(chatID, fmt.Sprintf("🎯 <b>Yeni Talep</b> — Müşteri: <b>%s</b>\nℹ️ İptal için /iptal", name), nil)
+		h.sendRequestStep(chatID, &BotSession{ChatID: chatID, UserID: user.ID, Step: "request_wizard", Data: d}, 1, user.ID)
+
+	// ── İlan İlgileri (lead/teklif) ────────────────────────────
+	case data == "int_add":
+		h.startInterestWizard(chatID, user)
+	case data == "int_list":
+		h.sendInterestList(chatID, user, false)
+	case data == "int_today":
+		h.sendInterestList(chatID, user, true)
+	case strings.HasPrefix(data, "iwz_lst_"):
+		h.interestWizardListing(chatID, user, strings.TrimPrefix(data, "iwz_lst_"))
+	case strings.HasPrefix(data, "iwz_tip_"):
+		h.interestWizardTip(chatID, user, strings.TrimPrefix(data, "iwz_tip_"))
+	case strings.HasPrefix(data, "int_adv_"):
+		h.interestAdvance(chatID, user, strings.TrimPrefix(data, "int_adv_"))
+	case strings.HasPrefix(data, "int_won_"):
+		h.interestSetWon(chatID, user, strings.TrimPrefix(data, "int_won_"))
+	case strings.HasPrefix(data, "int_lost_"):
+		h.interestSetOutcome(chatID, user, strings.TrimPrefix(data, "int_lost_"), "kaybedildi")
+	case strings.HasPrefix(data, "int_cust_"):
+		h.interestToCustomer(chatID, user, strings.TrimPrefix(data, "int_cust_"))
+	case strings.HasPrefix(data, "int_pkg_"):
+		h.interestTaskPackage(chatID, user, strings.TrimPrefix(data, "int_pkg_"))
+
+	case data == "sc_listing":
+		s := h.getSession(chatID)
+		name, phone := "", ""
+		if s != nil && s.Data != nil { name = s.Data["shared_name"]; phone = s.Data["shared_phone"] }
+		contact := name
+		if phone != "" { contact = name + " " + phone }
+		// İlan wizard'ı başlat, contact önceden dolu
+		d := map[string]string{"_step_idx": "0", "contact": contact}
+		h.setSession(chatID, user.ID, "listing_wizard", d)
+		h.tg.SendMessage(chatID, fmt.Sprintf("🏠 <b>Yeni Portföy</b> — Malik: <b>%s</b>\nℹ️ İptal için /iptal", name), nil)
+		h.showListingStepPrompt(chatID, &BotSession{ChatID: chatID, UserID: user.ID, Step: "listing_wizard", Data: d}, 0)
+
+	case data == "sc_interest":
+		s := h.getSession(chatID)
+		name, phone := "", ""
+		if s != nil && s.Data != nil { name = s.Data["shared_name"]; phone = s.Data["shared_phone"] }
+		// İlgi wizard'ı başlat, alıcı önceden dolu → ilan seçiminden devam
+		d := map[string]string{"_iwz": "listing", "buyer_name": name, "buyer_phone": phone}
+		h.setSession(chatID, user.ID, "interest_wizard", d)
+		h.tg.SendMessage(chatID, fmt.Sprintf("📞 <b>Yeni İlgi</b> — Alıcı: <b>%s</b>", name), nil)
+		h.sendInterestListingPicker(chatID, user)
+
+	case data == "sc_task":
+		h.clearSession(chatID)
+		h.tg.SendMessage(chatID, "🚧 <b>Görev Ekle</b> yakında eklenecek.", nil)
+
 	// ── Bildirimler ───────────────────────────────────────────
+	case data == "task_add_soon":
+		h.tg.SendMessage(chatID, "🚧 <b>Görev Ekle</b> yakında eklenecek.\nŞimdilik görevleri web arayüzünden ekleyebilirsiniz.", nil)
+	case data == "settings_soon":
+		h.tg.SendMessage(chatID, "🚧 <b>Ayarlar</b> yakında eklenecek.", nil)
+
 	case data == "menu_notify":
 		notifyOn := user.NotifyTelegram
 		status := "🔔 Aktif"
@@ -438,6 +597,98 @@ func (h *BotHandler) sendListingsFiltered(chatID int64, user *model.User, f repo
 	}
 }
 
+// handleSharedContact — rehberden paylaşılan kişi geldiğinde ne yapılacağını sorar
+func (h *BotHandler) handleSharedContact(chatID int64, user *model.User, ct *svc.TGContact) {
+	name := strings.TrimSpace(ct.FirstName + " " + ct.LastName)
+	phone := ct.PhoneNumber
+	// vCard'dan email ayıkla (varsa)
+	email := extractVCardEmail(ct.VCard)
+
+	// Paylaşılan kişiyi session'a yaz (seçim sonrası kullanılacak)
+	data := map[string]string{
+		"shared_name":  name,
+		"shared_phone": phone,
+		"shared_email": email,
+	}
+	h.setSession(chatID, user.ID, "shared_contact", data)
+
+	info := "📇 <b>Paylaşılan Kişi</b>\n👤 " + name
+	if phone != "" { info += "\n📞 " + phone }
+	if email != "" { info += "\n✉️ " + email }
+	info += "\n\nNe yapmak istersiniz?"
+
+	kb := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{
+		{{Text: "🏠 İlan Ekle", CallbackData: "sc_listing"}, {Text: "🎯 Talep Ekle", CallbackData: "sc_request"}},
+		{{Text: "📞 İlgi Ekle", CallbackData: "sc_interest"}, {Text: "✅ Görev Ekle", CallbackData: "sc_task"}},
+		{{Text: "👤 Müşteri Olarak Kaydet", CallbackData: "sc_customer"}},
+		{{Text: "❌ İptal", CallbackData: "sc_cancel"}},
+	}}
+	h.tg.SendMessage(chatID, info, kb)
+}
+
+// extractVCardEmail — vCard metninden ilk e-postayı çıkarır
+func extractVCardEmail(vcard string) string {
+	if vcard == "" { return "" }
+	for _, line := range strings.Split(vcard, "\n") {
+		u := strings.ToUpper(line)
+		if strings.HasPrefix(u, "EMAIL") {
+			if idx := strings.LastIndex(line, ":"); idx >= 0 && idx+1 < len(line) {
+				return strings.TrimSpace(line[idx+1:])
+			}
+		}
+	}
+	return ""
+}
+
+// sendPairMenu — çift-etiketli ana butona basınca chat-içi iki seçenek gösterir
+func (h *BotHandler) sendPairMenu(chatID int64, title, lbl1, cb1, lbl2, cb2 string) {
+	kb := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{
+		{{Text: lbl1, CallbackData: cb1}, {Text: lbl2, CallbackData: cb2}},
+	}}
+	h.tg.SendMessage(chatID, title, kb)
+}
+
+// sendCustomerMenu — Müşteriler ana menüsü
+func (h *BotHandler) sendCustomerMenu(chatID int64, user *model.User) {
+	customers, _ := h.customerRepo.List(user.ID, false, "")
+	kb := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{
+		{{Text: "➕ Yeni Müşteri", CallbackData: "cust_add"}},
+		{{Text: "📋 Müşterilerim", CallbackData: "cust_list"}},
+		{{Text: "🔍 Müşteri Ara", CallbackData: "cust_search"}},
+	}}
+	h.tg.SendMessage(chatID,
+		fmt.Sprintf("👥 <b>Müşteriler</b>\nToplam %d müşteriniz var.", len(customers)), kb)
+}
+
+// sendCustomerList — müşterileri sil butonlarıyla listeler
+func (h *BotHandler) sendCustomerList(chatID int64, user *model.User, search string) {
+	customers, _ := h.customerRepo.List(user.ID, false, search)
+	if len(customers) == 0 {
+		if search != "" {
+			h.tg.SendMessage(chatID, "📭 Eşleşen müşteri bulunamadı.", nil)
+		} else {
+			h.tg.SendMessage(chatID, "📭 Henüz müşteriniz yok.", nil)
+		}
+		return
+	}
+	limit := len(customers)
+	if limit > 20 { limit = 20 }
+	h.tg.SendMessage(chatID, fmt.Sprintf("👥 <b>Müşterileriniz</b> (%d):", len(customers)), nil)
+	for i := 0; i < limit; i++ {
+		cu := customers[i]
+		info := "👤 <b>" + cu.Name + "</b>"
+		if cu.Phone != "" { info += "\n📞 " + cu.Phone }
+		if cu.Email != "" { info += "\n✉️ " + cu.Email }
+		kb := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{
+			{{Text: "🗑 Sil", CallbackData: fmt.Sprintf("cust_del_%d", cu.ID)}},
+		}}
+		h.tg.SendMessage(chatID, info, kb)
+	}
+	if len(customers) > 20 {
+		h.tg.SendMessage(chatID, fmt.Sprintf("… ve %d müşteri daha. Aramayı kullanın.", len(customers)-20), nil)
+	}
+}
+
 // startMineFilter — İlanlarım drill-down filtresini başlatır
 func (h *BotHandler) startMineFilter(chatID int64, user *model.User) {
 	h.setSession(chatID, user.ID, "mine_filter", map[string]string{})
@@ -481,6 +732,136 @@ func (h *BotHandler) sendMineFilterResults(chatID int64, user *model.User) {
 	}
 	h.clearSession(chatID)
 	h.sendListingsFiltered(chatID, user, f)
+}
+
+// showListingStepPrompt — ilan wizard'\''ında verilen adımı doğru klavyeyle gösterir
+func (h *BotHandler) showListingStepPrompt(chatID int64, session *BotSession, idx int) {
+	propType := session.Data["property_type"]
+	steps := h.listingSteps(propType)
+	if idx >= len(steps) {
+		h.askListingNotify(chatID)
+		return
+	}
+	step := steps[idx]
+	var kb interface{}
+	if step.Keyboard != nil {
+		if step.Key == "neighborhood" {
+			hoods := h.cfg.NeighborhoodsFor(session.Data["district"])
+			kb = svc.NeighborhoodKeyboard(hoods, "wiz_hood")
+		} else if step.Key == "_photos" {
+			kb = step.Keyboard()
+			h.tg.SendMessage(chatID, step.Prompt, kb)
+			return
+		} else {
+			kb = step.Keyboard()
+		}
+	}
+	if kb != nil {
+		h.tg.SendMessage(chatID, step.Prompt, kb)
+		return
+	}
+	// Müşteri/iletişim adımı → Yeni/Mevcut seçimi
+	if step.Key == "contact" {
+		// Contact önceden doldurulmuşsa (rehberden paylaşım) bu adımı atla
+		if strings.TrimSpace(session.Data["contact"]) != "" {
+			h.advanceListingPastContact(chatID, session)
+			return
+		}
+		h.showListingCustomerChoice(chatID, session)
+		return
+	}
+	skipKeys := map[string]bool{"contact": true, "neighborhood": true, "area_m2": true, "description": true}
+	if skipKeys[step.Key] {
+		h.tg.SendMessage(chatID, step.Prompt, svc.SkipKeyboard(step.Key))
+	} else {
+		combined := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{{{Text: "❌ İptal", CallbackData: "wizard_cancel"}}}}
+		h.tg.SendMessage(chatID, step.Prompt, combined)
+	}
+}
+
+// showListingCustomerChoice — Yeni/Mevcut müşteri seçimi
+func (h *BotHandler) showListingCustomerChoice(chatID int64, session *BotSession) {
+	session.Data["_lcust_search"] = ""
+	h.saveSession(session)
+	kb := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{
+		{{Text: "➕ Yeni Müşteri", CallbackData: "lwiz_cust_new"}},
+		{{Text: "🔍 Mevcut Müşteriler", CallbackData: "lwiz_cust_pick"}},
+		{{Text: "⏭️ Atla", CallbackData: "lwiz_cust_skip"}},
+		{{Text: "❌ İptal", CallbackData: "wizard_cancel"}},
+	}}
+	h.tg.SendMessage(chatID, "👤 <b>Müşteri / Malik</b>\nYeni müşteri mi ekleyeceksiniz, mevcut müşterilerden mi seçeceksiniz?", kb)
+}
+
+// advanceListingPastContact — contact adımından sonrakine geçer
+func (h *BotHandler) advanceListingPastContact(chatID int64, session *BotSession) {
+	propType := session.Data["property_type"]
+	steps := h.listingSteps(propType)
+	ci := -1
+	for i, s := range steps {
+		if s.Key == "contact" { ci = i; break }
+	}
+	nextIdx := ci + 1
+	session.Data["_step_idx"] = strconv.Itoa(nextIdx)
+	session.Data["_lcust_search"] = ""
+	h.saveSession(session)
+	h.showListingStepPrompt(chatID, session, nextIdx)
+}
+
+// listingCustomerPicker — mevcut müşteri buton listesi (ilan wizard)
+func (h *BotHandler) listingCustomerPicker(customers []model.Customer) *svc.TGInlineKeyboard {
+	var rows [][]svc.TGInlineButton
+	for _, c := range customers {
+		label := c.Name
+		if c.Phone != "" { label += " · " + c.Phone }
+		rows = append(rows, []svc.TGInlineButton{{Text: label, CallbackData: "lwiz_cust_" + label}})
+	}
+	rows = append(rows, []svc.TGInlineButton{{Text: "❌ İptal", CallbackData: "wizard_cancel"}})
+	return &svc.TGInlineKeyboard{InlineKeyboard: rows}
+}
+
+// listingCustomerSearchKb — arama sonuçları + yeni ekle (ilan wizard)
+func (h *BotHandler) listingCustomerSearchKb(customers []model.Customer, typed string) *svc.TGInlineKeyboard {
+	var rows [][]svc.TGInlineButton
+	for _, c := range customers {
+		label := c.Name
+		if c.Phone != "" { label += " · " + c.Phone }
+		rows = append(rows, []svc.TGInlineButton{{Text: label, CallbackData: "lwiz_cust_" + label}})
+	}
+	rows = append(rows,
+		[]svc.TGInlineButton{{Text: "➕ Yeni: " + typed, CallbackData: "lwiz_custnew"}},
+		[]svc.TGInlineButton{{Text: "❌ İptal", CallbackData: "wizard_cancel"}},
+	)
+	return &svc.TGInlineKeyboard{InlineKeyboard: rows}
+}
+
+// parseContact — "Ahmet Yılmaz 0532 123 45 67" → ad + telefon
+func parseContact(s string) (name, phone string) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", ""
+	}
+	firstDigit := -1
+	for i, ch := range s {
+		if ch >= '0' && ch <= '9' {
+			firstDigit = i
+			break
+		}
+	}
+	if firstDigit == -1 {
+		return s, "" // sadece isim
+	}
+	name = strings.TrimSpace(s[:firstDigit])
+	var d strings.Builder
+	for _, ch := range s[firstDigit:] {
+		if ch >= '0' && ch <= '9' {
+			d.WriteRune(ch)
+		}
+	}
+	phone = d.String()
+	if name == "" {
+		name = s
+	}
+	return name, phone
 }
 
 func formatTGPrice(s string) string {
@@ -557,15 +938,61 @@ func (h *BotHandler) startListingWizard(chatID int64, user *model.User, propType
 }
 
 func (h *BotHandler) handleSessionStep(msg *svc.TGMessage, user *model.User, session *BotSession, _ map[string]string) {
-	if session.Step != "listing_wizard" && session.Step != "request_wizard" {
+	switch session.Step {
+	case "listing_wizard":
+		h.listingWizardTextStep(msg, user, session)
+	case "request_wizard":
+		h.requestWizardTextStep(msg, user, session)
+	case "cust_add":
+		h.customerAddTextStep(msg, user, session)
+	case "interest_wizard":
+		h.interestWizardTextStep(msg, user, session)
+	case "cust_search":
+		h.clearSession(msg.Chat.ID)
+		h.sendCustomerList(msg.Chat.ID, user, strings.TrimSpace(msg.Text))
+	default:
+		// Bilinmeyen/eski step → temizle ve ana menüyü göster
+		h.clearSession(msg.Chat.ID)
 		h.sendMainMenu(msg.Chat.ID, "Ana Menü:")
+	}
+}
+
+// customerAddTextStep — Müşteriler menüsünden yeni müşteri ekleme (isim → telefon)
+func (h *BotHandler) customerAddTextStep(msg *svc.TGMessage, user *model.User, session *BotSession) {
+	chatID := msg.Chat.ID
+	text := strings.TrimSpace(msg.Text)
+	step := session.Data["_cstep"]
+	if step == "name" {
+		if text == "" || text == "-" {
+			h.tg.SendMessage(chatID, "👤 Müşteri adını yazın:", nil)
+			return
+		}
+		session.Data["_cname"] = text
+		session.Data["_cstep"] = "phone"
+		h.saveSession(session)
+		h.tg.SendMessage(chatID, "📞 Telefon numarasını yazın (yoksa - yazın):", nil)
 		return
 	}
-	if session.Step == "listing_wizard" {
-		h.listingWizardTextStep(msg, user, session)
-	} else {
-		h.requestWizardTextStep(msg, user, session)
+	if step == "phone" {
+		phone := text
+		if phone == "-" { phone = "" }
+		name := session.Data["_cname"]
+		h.clearSession(chatID)
+		// Mükerrer kontrolü
+		if dup, _ := h.customerRepo.FindDuplicate(user.ID, name, phone); dup != nil {
+			h.tg.SendMessage(chatID, fmt.Sprintf("ℹ️ <b>%s</b> zaten kayıtlı. Yeni kayıt oluşturulmadı.", dup.Name), nil)
+			return
+		}
+		newC := &model.Customer{UserID: user.ID, Name: name, Phone: phone}
+		if err := h.customerRepo.Create(newC); err != nil {
+			h.tg.SendMessage(chatID, "❌ Müşteri eklenemedi: "+err.Error(), nil)
+		} else {
+			h.tg.SendMessage(chatID, fmt.Sprintf("✅ <b>%s</b> eklendi.", name), nil)
+		}
+		return
 	}
+	h.clearSession(chatID)
+	h.sendMainMenu(chatID, "Ana Menü:")
 }
 
 func (h *BotHandler) handleWizardCallback(cb *svc.TGCallback, user *model.User, session *BotSession, data string) {
@@ -603,6 +1030,69 @@ func (h *BotHandler) listingWizardTextStep(msg *svc.TGMessage, user *model.User,
 		return
 	}
 
+	// Müşteri/iletişim adımı
+	if currentStep.Key == "contact" {
+		text := strings.TrimSpace(msg.Text)
+		// Yeni müşteri: önce isim
+		if session.Data["_lcust_new"] == "name" {
+			if text == "" || text == "-" {
+				h.tg.SendMessage(chatID, "👤 Müşteri adını yazın:", nil)
+				return
+			}
+			session.Data["_lcust_name"] = text
+			session.Data["_lcust_new"] = "phone"
+			h.saveSession(session)
+			h.tg.SendMessage(chatID, "📞 Telefon numarasını yazın (yoksa - yazın):", nil)
+			return
+		}
+		// Yeni müşteri: sonra telefon → contact'a "Ad Tel" yaz ve ilerle
+		if session.Data["_lcust_new"] == "phone" {
+			phone := text
+			if phone == "-" { phone = "" }
+			name := session.Data["_lcust_name"]
+			// Mükerrer kontrolü — varsa mevcut müşteriye bağla
+			if dup, _ := h.customerRepo.FindDuplicate(session.UserID, name, phone); dup != nil {
+				name = dup.Name
+				phone = dup.Phone
+				h.tg.SendMessage(chatID, fmt.Sprintf("ℹ️ <b>%s</b> zaten kayıtlı, mevcut müşteriye bağlandı.", dup.Name), nil)
+			}
+			contact := name
+			if phone != "" { contact = name + " " + phone }
+			session.Data["contact"] = contact
+			session.Data["_lcust_new"] = ""
+			h.advanceListingPastContact(chatID, session)
+			return
+		}
+		// Arama modu: yazılanı ara, sonuçları buton göster
+		if session.Data["_lcust_search"] == "1" {
+			if text == "" || text == "-" {
+				h.advanceListingPastContact(chatID, session)
+				return
+			}
+			results, _ := h.customerRepo.List(session.UserID, false, text)
+			session.Data["_lcust_typed"] = text
+			h.saveSession(session)
+			if len(results) > 0 {
+				if len(results) > 8 { results = results[:8] }
+				h.tg.SendMessage(chatID,
+					fmt.Sprintf("🔍 \"%s\" için %d sonuç. Seçin veya yeni ekleyin:", text, len(results)),
+					h.listingCustomerSearchKb(results, text))
+			} else {
+				kb := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{
+					{{Text: "➕ Yeni: " + text, CallbackData: "lwiz_custnew"}},
+					{{Text: "❌ İptal", CallbackData: "wizard_cancel"}},
+				}}
+				h.tg.SendMessage(chatID,
+					fmt.Sprintf("🔍 \"%s\" için eşleşme yok. Yeni ekleyebilir veya tekrar arayabilirsiniz.", text), kb)
+			}
+			return
+		}
+		// Yeni müşteri yazımı (serbest "ad telefon")
+		session.Data["contact"] = text
+		h.advanceListingPastContact(chatID, session)
+		return
+	}
+
 	val := strings.TrimSpace(msg.Text)
 	if val == "-" { val = "" }
 	session.Data[currentStep.Key] = val
@@ -616,34 +1106,7 @@ func (h *BotHandler) listingWizardTextStep(msg *svc.TGMessage, user *model.User,
 		return
 	}
 
-	nextStep := steps[nextIdx]
-	var kb interface{}
-	if nextStep.Keyboard != nil {
-		if nextStep.Key == "neighborhood" {
-			district := session.Data["district"]
-			hoods := h.cfg.NeighborhoodsFor(district)
-			kb = svc.NeighborhoodKeyboard(hoods, "wiz_hood")
-		} else if nextStep.Key == "_photos" {
-			// _photos adımına geçince doğrudan fotoğraf promptunu göster
-			kb = nextStep.Keyboard()
-			h.tg.SendMessage(chatID, nextStep.Prompt, kb)
-			return
-		} else {
-			kb = nextStep.Keyboard()
-		}
-	}
-	if kb != nil {
-		h.tg.SendMessage(chatID, nextStep.Prompt, kb)
-	} else {
-		// Zorunlu olmayan metin adımlarında "Geç" butonu
-		skipKeys := map[string]bool{"contact":true,"neighborhood":true,"area_m2":true,"description":true}
-		if skipKeys[nextStep.Key] {
-			h.tg.SendMessage(chatID, nextStep.Prompt, svc.SkipKeyboard(nextStep.Key))
-		} else {
-			combined := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{{{Text: "❌ İptal", CallbackData: "wizard_cancel"}}}}
-			h.tg.SendMessage(chatID, nextStep.Prompt, combined)
-		}
-	}
+	h.showListingStepPrompt(chatID, session, nextIdx)
 }
 
 func (h *BotHandler) listingWizardCallbackStep(chatID int64, user *model.User, session *BotSession, cbData string) {
@@ -661,6 +1124,51 @@ func (h *BotHandler) listingWizardCallbackStep(chatID int64, user *model.User, s
 		return
 	}
 
+	// Müşteri/iletişim adımı — Yeni/Mevcut/seçim
+	if currentStep.Key == "contact" {
+		switch {
+		case cbData == "lwiz_cust_new":
+			session.Data["_lcust_search"] = ""
+			session.Data["_lcust_new"] = "name"
+			h.saveSession(session)
+			h.tg.SendMessage(chatID, "➕ <b>Yeni Müşteri</b>\nMüşteri adını yazın:", nil)
+			return
+		case cbData == "lwiz_cust_skip":
+			session.Data["contact"] = ""
+			h.advanceListingPastContact(chatID, session)
+			return
+		case cbData == "lwiz_cust_pick":
+			customers, _ := h.customerRepo.List(session.UserID, false, "")
+			if len(customers) == 0 {
+				session.Data["_lcust_search"] = ""
+				h.saveSession(session)
+				h.tg.SendMessage(chatID, "📭 Kayıtlı müşteriniz yok. Ad ve telefon yazın:", nil)
+			} else if len(customers) < 10 {
+				session.Data["_lcust_search"] = ""
+				h.saveSession(session)
+				h.tg.SendMessage(chatID, "👤 Müşteri seçin:", h.listingCustomerPicker(customers))
+			} else {
+				session.Data["_lcust_search"] = "1"
+				h.saveSession(session)
+				h.tg.SendMessage(chatID,
+					fmt.Sprintf("🔍 <b>Müşteri Ara</b>\n%d müşteriniz var. Ad veya telefonun ilk hanelerini yazın (örn: <i>ahm</i> veya <i>0532</i>).", len(customers)), nil)
+			}
+			return
+		case cbData == "lwiz_custnew":
+			session.Data["_lcust_name"] = session.Data["_lcust_typed"]
+			session.Data["_lcust_search"] = ""
+			session.Data["_lcust_new"] = "phone"
+			h.saveSession(session)
+			h.tg.SendMessage(chatID, "📞 Telefon numarasını yazın (yoksa - yazın):", nil)
+			return
+		case strings.HasPrefix(cbData, "lwiz_cust_"):
+			label := strings.TrimPrefix(cbData, "lwiz_cust_")
+			session.Data["contact"] = strings.ReplaceAll(label, " · ", " ")
+			h.advanceListingPastContact(chatID, session)
+			return
+		}
+	}
+
 	prefixes := []string{"wiz_lt_", "wiz_dist_", "wiz_hood_", "wiz_rooms_", "wiz_zoning_"}
 	val := cbData
 	for _, p := range prefixes {
@@ -676,32 +1184,7 @@ func (h *BotHandler) listingWizardCallbackStep(chatID int64, user *model.User, s
 		h.askListingNotify(chatID)
 		return
 	}
-	nextStep := steps[nextIdx]
-	var kb interface{}
-	if nextStep.Keyboard != nil {
-		if nextStep.Key == "neighborhood" {
-			district := session.Data["district"]
-			hoods := h.cfg.NeighborhoodsFor(district)
-			kb = svc.NeighborhoodKeyboard(hoods, "wiz_hood")
-		} else if nextStep.Key == "_photos" {
-			kb = nextStep.Keyboard()
-			h.tg.SendMessage(chatID, nextStep.Prompt, kb)
-			return
-		} else {
-			kb = nextStep.Keyboard()
-		}
-	}
-	if kb != nil {
-		h.tg.SendMessage(chatID, nextStep.Prompt, kb)
-	} else {
-		skipKeys := map[string]bool{"contact":true,"neighborhood":true,"area_m2":true,"description":true}
-		if skipKeys[nextStep.Key] {
-			h.tg.SendMessage(chatID, nextStep.Prompt, svc.SkipKeyboard(nextStep.Key))
-		} else {
-			combined := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{{{Text: "❌ İptal", CallbackData: "wizard_cancel"}}}}
-			h.tg.SendMessage(chatID, nextStep.Prompt, combined)
-		}
-	}
+	h.showListingStepPrompt(chatID, session, nextIdx)
 }
 
 // handleListingPhoto — wizard sırasında gelen fotoğrafı indir ve kaydet
@@ -806,10 +1289,30 @@ func (h *BotHandler) finalizeListing(chatID int64, user *model.User, data map[st
 		"_source":       "telegram",
 	}
 
+	// İletişim bilgisinden müşteri (malik) oluştur/bul ve ilana bağla
+	var custID int64
+	cName, cPhone := parseContact(data["contact"])
+	if cName != "" {
+		existing, _ := h.customerRepo.List(user.ID, false, cName)
+		for _, cu := range existing {
+			if strings.EqualFold(cu.Name, cName) {
+				custID = cu.ID
+				break
+			}
+		}
+		if custID == 0 {
+			newC := &model.Customer{UserID: user.ID, Name: cName, Phone: cPhone}
+			if err := h.customerRepo.Create(newC); err == nil {
+				custID = newC.ID
+			}
+		}
+	}
+
 	listing := &model.Listing{
-		UserID:   user.ID,
-		Fields:   fields,
-		IsActive: true,
+		UserID:     user.ID,
+		Fields:     fields,
+		IsActive:   true,
+		CustomerID: custID,
 	}
 	if err := h.listingRepo.Create(listing); err != nil {
 		log.Printf("[BOT][HATA] ilan oluşturma: %v | user=%d fields=%v", err, user.ID, fields)
@@ -918,25 +1421,65 @@ func (h *BotHandler) requestWizardTextStep(msg *svc.TGMessage, user *model.User,
 	// _customer adımında: buton kullanmadıysa elle ad yazıyor
 	if step.Key == "_customer" {
 		text := strings.TrimSpace(msg.Text)
+		// Yeni müşteri: önce isim
+		if session.Data["_cust_new"] == "name" {
+			if text == "" || text == "-" {
+				h.tg.SendMessage(chatID, "👤 Müşteri adını yazın:", nil)
+				return
+			}
+			session.Data["client_name"] = text
+			session.Data["_cust_new"] = "phone"
+			h.saveSession(session)
+			h.tg.SendMessage(chatID, "📞 Telefon numarasını yazın (yoksa - yazın):", nil)
+			return
+		}
+		// Yeni müşteri: sonra telefon → kaydet ve ilerle
+		if session.Data["_cust_new"] == "phone" {
+			phone := text
+			if phone == "-" { phone = "" }
+			// Mükerrer kontrolü — varsa mevcut müşteriye bağla
+			if dup, _ := h.customerRepo.FindDuplicate(session.UserID, session.Data["client_name"], phone); dup != nil {
+				session.Data["client_name"] = dup.Name
+				session.Data["phone"] = dup.Phone
+				h.tg.SendMessage(chatID, fmt.Sprintf("ℹ️ <b>%s</b> zaten kayıtlı, mevcut müşteriye bağlandı.", dup.Name), nil)
+			} else {
+				session.Data["phone"] = phone
+			}
+			session.Data["_cust_new"] = ""
+			nextIdx := idx + 1
+			session.Data["_step_idx"] = strconv.Itoa(nextIdx)
+			h.saveSession(session)
+			h.sendRequestStep(chatID, session, nextIdx, session.UserID)
+			return
+		}
 		if text == "" || text == "-" {
 			h.tg.SendMessage(chatID, "👤 Müşteri adını yazın:", nil)
 			return
 		}
-		// "Ad Soyad · Tel" formatında mı geldi (listeden seçim)
-		parts := strings.SplitN(text, " · ", 2)
-		session.Data["client_name"] = strings.TrimSpace(parts[0])
-		if len(parts) == 2 {
-			session.Data["phone"] = strings.TrimSpace(parts[1])
-		} else {
-			// Sadece isim — telefon sonra sorulacak
-			session.Data["phone"] = ""
-			// Telefon adımı için ek sorgu
-			nextIdx := idx + 1
-			session.Data["_step_idx"] = strconv.Itoa(nextIdx)
+		// Arama modu (çok müşteri varken): yazılanı ara, sonuçları buton göster
+		if session.Data["_cust_search"] == "1" {
+			results, _ := h.customerRepo.List(session.UserID, false, text)
+			session.Data["_cust_typed"] = text
 			h.saveSession(session)
-			h.tg.SendMessage(chatID, "📞 Telefon numarasını yazın:", nil)
+			if len(results) > 0 {
+				if len(results) > 8 { results = results[:8] }
+				h.tg.SendMessage(chatID,
+					fmt.Sprintf("🔍 \"%s\" için %d sonuç. Seçin veya yeni ekleyin:", text, len(results)),
+					h.customerSearchKeyboard(results, text))
+			} else {
+				kb := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{
+					{{Text: "➕ Yeni: " + text, CallbackData: "rwiz_custnew"}},
+					{{Text: "❌ İptal", CallbackData: "wizard_cancel"}},
+				}}
+				h.tg.SendMessage(chatID,
+					fmt.Sprintf("🔍 \"%s\" için eşleşme yok. Yeni müşteri olarak ekleyebilir veya tekrar arayabilirsiniz.", text), kb)
+			}
 			return
 		}
+		// Yeni müşteri: "Ad Soyad 0532..." → isim + telefon ayır
+		cn, cp := parseContact(text)
+		session.Data["client_name"] = cn
+		session.Data["phone"] = cp
 		nextIdx := idx + 1
 		session.Data["_step_idx"] = strconv.Itoa(nextIdx)
 		h.saveSession(session)
@@ -976,16 +1519,56 @@ func (h *BotHandler) requestWizardCallbackStep(chatID int64, user *model.User, s
 	}
 	// Müşteri seçimi: "Ad · Tel" veya "rwiz_cust_elle" (elle yazacak)
 	if step.Key == "_customer" {
+		// Yeni müşteri ekle → ad yaz
+		if cbData == "rwiz_cust_new" {
+			session.Data["_cust_search"] = ""
+			session.Data["_cust_new"] = "name"
+			h.saveSession(session)
+			h.tg.SendMessage(chatID, "➕ <b>Yeni Müşteri</b>\nMüşteri adını yazın:", nil)
+			return
+		}
+		// Mevcut müşterilerden seç → <10 liste, ≥10 arama
+		if cbData == "rwiz_cust_pick" {
+			customers, _ := h.customerRepo.List(session.UserID, false, "")
+			if len(customers) == 0 {
+				session.Data["_cust_search"] = ""
+				h.saveSession(session)
+				h.tg.SendMessage(chatID, "📭 Kayıtlı müşteriniz yok. Müşteri adını yazın:", nil)
+			} else if len(customers) < 10 {
+				session.Data["_cust_search"] = ""
+				h.saveSession(session)
+				h.tg.SendMessage(chatID, "👤 Müşteri seçin:", h.customerPickerKeyboard(customers))
+			} else {
+				session.Data["_cust_search"] = "1"
+				h.saveSession(session)
+				h.tg.SendMessage(chatID,
+					fmt.Sprintf("🔍 <b>Müşteri Ara</b>\n%d müşteriniz var. Adın veya telefonun ilk birkaç hanesini yazın (örn: <i>ahm</i> veya <i>0532</i>).", len(customers)),
+					nil)
+			}
+			return
+		}
 		if cbData == "rwiz_cust_elle" {
+			session.Data["_cust_search"] = ""
+			h.saveSession(session)
 			h.tg.SendMessage(chatID, "👤 Müşteri adını yazın:", nil)
 			return
 		}
-		// "Ad Soyad · Tel" ayrıştır
+		// Aramada bulunamadı → yazılan adla yeni müşteri, telefon sor
+		if cbData == "rwiz_custnew" {
+			session.Data["client_name"] = session.Data["_cust_typed"]
+			session.Data["_cust_search"] = ""
+			session.Data["_cust_new"] = "phone"
+			h.saveSession(session)
+			h.tg.SendMessage(chatID, "📞 Telefon numarasını yazın (yoksa - yazın):", nil)
+			return
+		}
+		// "Ad Soyad · Tel" ayrıştır (listeden/aramadan seçim)
 		parts := strings.SplitN(val, " · ", 2)
 		session.Data["client_name"] = strings.TrimSpace(parts[0])
 		if len(parts) == 2 {
 			session.Data["phone"] = strings.TrimSpace(parts[1])
 		}
+		session.Data["_cust_search"] = ""
 		nextIdx := idx + 1
 		session.Data["_step_idx"] = strconv.Itoa(nextIdx)
 		h.saveSession(session)
@@ -1011,15 +1594,15 @@ func (h *BotHandler) sendRequestStep(chatID int64, session *BotSession, idx int,
 
 	switch step.Key {
 	case "_customer":
-		// Son 10 müşteriyi listele + "Elle yaz" seçeneği
-		uid := int64(0); if len(userID) > 0 { uid = userID[0] }
-		customers, _ := h.customerRepo.List(uid, false, "")
-		if len(customers) == 0 {
-			h.tg.SendMessage(chatID, "👤 Müşteri adını yazın:", nil)
-		} else {
-			h.tg.SendMessage(chatID, "👤 Müşteri seçin veya 'Elle yaz' deyin:",
-				h.customerPickerKeyboard(customers[:intMin(len(customers), 10)]))
-		}
+		// Önce: Yeni mi ekle, mevcuttan mı seç?
+		session.Data["_cust_search"] = ""
+		h.saveSession(session)
+		kb := &svc.TGInlineKeyboard{InlineKeyboard: [][]svc.TGInlineButton{
+			{{Text: "➕ Yeni Müşteri", CallbackData: "rwiz_cust_new"}},
+			{{Text: "🔍 Mevcut Müşteriler", CallbackData: "rwiz_cust_pick"}},
+			{{Text: "❌ İptal", CallbackData: "wizard_cancel"}},
+		}}
+		h.tg.SendMessage(chatID, "👤 <b>Müşteri</b>\nYeni müşteri mi eklemek istersiniz, mevcut müşterilerden mi seçeceksiniz?", kb)
 	case "listing_type":
 		h.tg.SendMessage(chatID, "🏷️ Satılık mı, Kiralık mı?",
 			svc.ListingTypeKeyboard("rwiz_lt"))
@@ -1201,6 +1784,24 @@ func (h *BotHandler) customerPickerKeyboard(customers []model.Customer) *svc.TGI
 	}
 	rows = append(rows,
 		[]svc.TGInlineButton{{Text: "✏️ Elle yaz", CallbackData: "rwiz_cust_elle"}},
+		[]svc.TGInlineButton{{Text: "❌ İptal", CallbackData: "wizard_cancel"}},
+	)
+	return &svc.TGInlineKeyboard{InlineKeyboard: rows}
+}
+
+// customerSearchKeyboard — arama sonuçları + "yeni ekle" butonu
+func (h *BotHandler) customerSearchKeyboard(customers []model.Customer, typedName string) *svc.TGInlineKeyboard {
+	var rows [][]svc.TGInlineButton
+	for _, c := range customers {
+		label := c.Name
+		if c.Phone != "" { label += " · " + c.Phone }
+		rows = append(rows, []svc.TGInlineButton{{
+			Text:         label,
+			CallbackData: "rwiz_cust_" + label,
+		}})
+	}
+	rows = append(rows,
+		[]svc.TGInlineButton{{Text: "➕ Yeni: " + typedName, CallbackData: "rwiz_custnew"}},
 		[]svc.TGInlineButton{{Text: "❌ İptal", CallbackData: "wizard_cancel"}},
 	)
 	return &svc.TGInlineKeyboard{InlineKeyboard: rows}

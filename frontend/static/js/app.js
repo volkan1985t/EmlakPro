@@ -44,6 +44,8 @@ async function loadConfig() {
   const user = API.getUser();
   const av = document.getElementById('user-avatar');
   if (av && user) { av.textContent = (user.full_name||user.username||'U')[0].toUpperCase(); av.title = user.full_name||user.username; }
+  const un = document.getElementById('hdr-username');
+  if (un && user) { un.textContent = user.full_name || user.username || ''; }
 }
 
 function showLogin() { document.getElementById('login-screen').style.display='flex'; document.getElementById('app').style.display='none'; }
@@ -156,6 +158,7 @@ function navigateTo(page) {
   if (page==='dashboard')  loadDashboard();
   if (page==='gorevler')   loadTasks();
   if (page==='pipeline')   loadPipeline();
+  if (page==='ilgiler')    loadInterests();
 }
 
 document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -1136,9 +1139,24 @@ function calcMatchScore(talep, ilan) {
   // Alt sınır: bütçe_min'in %10 altına kadar kabul et
   if (budgetMin && price < budgetMin*0.9) return 0;
   total+=15;
-  const tOda=talep.fields?.rooms, iOda=ilan.fields?.rooms;
-  if(!tOda) score+=15; else if(tOda===iOda) score+=15;
+  // Oda sayısı — yönlü: ilan >= talep olmalı, küçükse ele
+  const tR = roomCount(talep.fields?.rooms);
+  const iR = roomCount(ilan.fields?.rooms);
+  if (tR < 0) score += 15;          // talep oda belirtmemiş → herhangi biri olur
+  else if (iR < 0) score += 8;      // ilanda oda bilgisi yok → kısmi
+  else if (iR === tR) score += 15;  // tam eşleşme
+  else if (iR > tR) score += 12;    // ilan daha büyük → kabul edilebilir
+  else return 0;                    // ilan talepten küçük → uygun değil, ele
   return Math.round((score/total)*100);
+}
+
+// "5+1" → 5, "Stüdyo" → 0, boş → -1
+function roomCount(s) {
+  if (!s) return -1;
+  const low = String(s).toLowerCase();
+  if (low.includes('stüdyo') || low.includes('studio')) return 0;
+  const m = String(s).match(/(\d+)/);
+  return m ? parseInt(m[1]) : -1;
 }
 
 function scoreColor(pct) {
@@ -1207,9 +1225,9 @@ function renderRequests() {
     const ownerUser = state.allUsers?.find(u => u.id === t.user_id);
     const ownerName = ownerUser?.full_name || ownerUser?.username || '?';
     const nameHTML = isOwner
-      ? `<span class="rq-owner"><i class="ti ti-user"></i> ${escHtml(ownerName)}</span>
+      ? `<span class="rq-owner"><i class="ti ti-user"></i> Danışman: ${escHtml(ownerName)}</span>
          <span class="rq-mine">Benim müşterim</span>`
-      : `<span class="rq-owner"><i class="ti ti-user"></i> ${escHtml(ownerName)}</span>`;
+      : `<span class="rq-owner"><i class="ti ti-user"></i> Danışman: ${escHtml(ownerName)}</span>`;
 
     // Akordiyon içi — sadece owner ise Malik butonu
     const musteriKart = (isOwner && t.customer_id) ? `
@@ -3400,3 +3418,253 @@ init();
   // İlk durum
   sync();
 })();
+
+/* ═══════════════════════════════════════════════════════
+   İLAN İLGİLERİ (lead/teklif takibi)
+════════════════════════════════════════════════════════ */
+const ILGI_TIPLERI = {
+  bilgi:        { label: 'Bilgi talebi',   cls: 'tip-bilgi' },
+  teklif:       { label: 'Fiyat teklifi',  cls: 'tip-teklif' },
+  goruntuleme:  { label: 'Görüntüleme',    cls: 'tip-goruntuleme' },
+  belge:        { label: 'Resim / belge',  cls: 'tip-belge' },
+  geri_arama:   { label: 'Geri arama',     cls: 'tip-geri' },
+  baska_portfoy:{ label: 'Başka portföy',  cls: 'tip-baska' },
+};
+const ILGI_DURUMLARI = ['yeni','gorusuluyor','pazarlik','sonuc'];
+const ILGI_DURUM_LABEL = { yeni:'Yeni', gorusuluyor:'Görüşülüyor', pazarlik:'Pazarlık', sonuc:'Sonuç' };
+const ILGI_SONRAKI_ONERI = {
+  bilgi:        'Bilgi ver, 3 gün sonra durumunu sor',
+  teklif:       'Maliki ara ve teklifi sun',
+  goruntuleme:  'Randevu tarihi belirle',
+  belge:        'Belgeleri gönder',
+  geri_arama:   'Belirtilen saatte ara',
+  baska_portfoy:'Ne aradığını öğren, talebe dönüştür',
+};
+let _ilgiState = { items: [], todayOnly: false, tip: '', editId: null, myListings: [] };
+
+async function loadInterests() {
+  const board = document.getElementById('ilgi-board');
+  if (board) board.innerHTML = '<p class="muted" style="padding:1rem">Yükleniyor…</p>';
+  try {
+    const params = {};
+    if (_ilgiState.tip) params.status = undefined;
+    if (_ilgiState.todayOnly) params.today = '1';
+    const items = await API.getInterests(params) || [];
+    _ilgiState.items = _ilgiState.tip ? items.filter(i => i.type === _ilgiState.tip) : items;
+    renderInterestBoard();
+    renderTodayBanner();
+  } catch (e) {
+    if (board) board.innerHTML = '<p class="muted" style="padding:1rem">İlgiler yüklenemedi.</p>';
+  }
+}
+
+function renderTodayBanner() {
+  const banner = document.getElementById('ilgi-bugun-banner');
+  if (!banner) return;
+  const today = new Date().toISOString().slice(0,10);
+  const due = _ilgiState.items.filter(i => i.next_date && i.next_date <= today && i.status !== 'sonuc');
+  if (due.length === 0) { banner.style.display = 'none'; return; }
+  banner.style.display = 'flex';
+  banner.innerHTML = `🔔 <strong>${due.length}</strong> kişi bugün/aranmayı bekliyor`;
+}
+
+function renderInterestBoard() {
+  const board = document.getElementById('ilgi-board');
+  if (!board) return;
+  const items = _ilgiState.items;
+  board.innerHTML = ILGI_DURUMLARI.map(durum => {
+    const col = items.filter(i => i.status === durum);
+    const cards = col.map(ilgiCardHTML).join('') || '<p class="ilgi-empty">—</p>';
+    return `<div class="ilgi-col">
+      <div class="ilgi-col-head"><span>${ILGI_DURUM_LABEL[durum]}</span><span class="ilgi-count">${col.length}</span></div>
+      <div class="ilgi-col-body">${cards}</div>
+    </div>`;
+  }).join('');
+}
+
+function ilgiCardHTML(i) {
+  const tip = ILGI_TIPLERI[i.type] || { label: i.type, cls: '' };
+  const today = new Date().toISOString().slice(0,10);
+  let dateHTML = '';
+  if (i.next_date) {
+    const overdue = i.next_date <= today && i.status !== 'sonuc';
+    const label = i.next_date === today ? 'Bugün ara' : i.next_date;
+    dateHTML = `<div class="ilgi-date ${overdue?'overdue':''}">📅 ${escHtml(label)}</div>`;
+  }
+  const offer = i.offer_amount ? `<div class="ilgi-offer">${escHtml(i.offer_amount)}</div>` : '';
+  const listing = i.listing_title ? escHtml(i.listing_title) : (i.listing_id ? 'İlan #'+i.listing_id : 'İlansız');
+  const buyer = escHtml(i.buyer_name || '—');
+  return `<div class="ilgi-card" onclick="openIlgiModal(${i.id})">
+    <div class="ilgi-card-name">${buyer}</div>
+    <div class="ilgi-card-listing">${listing}</div>
+    <span class="ilgi-tip ${tip.cls}">${tip.label}</span>
+    ${offer}${dateHTML}
+  </div>`;
+}
+
+function ilgiToggleToday(btn) {
+  _ilgiState.todayOnly = !_ilgiState.todayOnly;
+  btn.classList.toggle('active', _ilgiState.todayOnly);
+  loadInterests();
+}
+
+function ilgiFillListingDropdown(selectedId) {
+  const sel = document.getElementById('i-listing');
+  if (!sel) return;
+  const opts = ['<option value="">— İlansız / genel —</option>'];
+  (_ilgiState.myListings || []).forEach(l => {
+    const t = (l.fields && l.fields.title) || ('İlan #'+l.id);
+    opts.push(`<option value="${l.id}" ${String(l.id)===String(selectedId)?'selected':''}>${escHtml(t)}</option>`);
+  });
+  sel.innerHTML = opts.join('');
+}
+
+function ilgiSyncFields() {
+  const type = document.getElementById('i-type').value;
+  const status = document.getElementById('i-status').value;
+  document.getElementById('i-offer-group').style.display = (type==='teklif') ? '' : 'none';
+  document.getElementById('i-outcome-group').style.display = (status==='sonuc') ? '' : 'none';
+}
+
+async function openIlgiModal(id) {
+  _ilgiState.editId = id || null;
+  document.getElementById('ilgi-modal-title').textContent = id ? 'İlgi Düzenle' : 'Yeni İlgi';
+  // Sadece kendi ilanlarını çek (başkasının ilanı bağlanamaz)
+  try { _ilgiState.myListings = await API.getListings({ only_mine: '1' }) || []; }
+  catch (e) { _ilgiState.myListings = []; }
+  ilgiFillListingDropdown('');
+  const it = id ? _ilgiState.items.find(x => x.id === id) : null;
+  const g = sel => document.getElementById(sel);
+  if (it) {
+    g('i-type').value = it.type;
+    ilgiFillListingDropdown(it.listing_id);
+    g('i-buyer-name').value = it.buyer_name || '';
+    g('i-buyer-phone').value = it.buyer_phone || '';
+    g('i-offer').value = it.offer_amount || '';
+    g('i-status').value = it.status;
+    g('i-outcome').value = it.outcome || '';
+    g('i-next-step').value = it.next_step || '';
+    g('i-next-date').value = it.next_date || '';
+    g('i-notes').value = it.notes || '';
+  } else {
+    g('i-type').value = 'bilgi';
+    g('i-buyer-name').value = ''; g('i-buyer-phone').value = '';
+    g('i-offer').value = ''; g('i-status').value = 'yeni';
+    g('i-outcome').value = ''; g('i-next-step').value = ILGI_SONRAKI_ONERI['bilgi'];
+    g('i-next-date').value = ''; g('i-notes').value = '';
+  }
+  ilgiSyncFields();
+  document.getElementById('ilgi-overlay').classList.add('open');
+}
+
+function closeIlgiModal() {
+  document.getElementById('ilgi-overlay').classList.remove('open');
+  _ilgiState.editId = null;
+}
+
+async function saveIlgi() {
+  const g = sel => document.getElementById(sel).value.trim();
+  const data = {
+    type: g('i-type'),
+    listing_id: parseInt(document.getElementById('i-listing').value || '0', 10),
+    buyer_name: g('i-buyer-name'),
+    buyer_phone: g('i-buyer-phone'),
+    offer_amount: g('i-offer'),
+    status: g('i-status'),
+    outcome: document.getElementById('i-status').value === 'sonuc' ? g('i-outcome') : '',
+    next_step: g('i-next-step'),
+    next_date: g('i-next-date'),
+    notes: g('i-notes'),
+  };
+  // Yeni kazanıldı mı? (önceki durumu kontrol et)
+  let wasWon = false;
+  if (_ilgiState.editId) {
+    const prev = _ilgiState.items.find(x => x.id === _ilgiState.editId);
+    wasWon = prev && prev.outcome === 'kazanildi';
+  }
+  const nowWon = data.status === 'sonuc' && data.outcome === 'kazanildi';
+  const buyerInfo = { name: data.buyer_name, listing_id: data.listing_id };
+  try {
+    if (_ilgiState.editId) {
+      await API.updateInterest(_ilgiState.editId, data);
+      showToast('✅ İlgi güncellendi');
+    } else {
+      await API.createInterest(data);
+      showToast('🎉 İlgi eklendi');
+    }
+    closeIlgiModal();
+    await loadInterests();
+    if (nowWon && !wasWon) openIlgiTaskModal(buyerInfo);
+  } catch (e) { showToast(e.message, 'error'); }
+}
+
+// Kazanıldı → görev paketi
+let _ilgiTaskCtx = null;
+function openIlgiTaskModal(ctx) {
+  _ilgiTaskCtx = ctx;
+  // İlana bağlıysa türünü ipucu olarak göster
+  let hint = '';
+  const lst = (_ilgiState.myListings || []).find(l => String(l.id) === String(ctx.listing_id));
+  const lt = lst && lst.fields && lst.fields.listing_type;
+  if (lt) hint = `İlan türü: <b>${escHtml(lt)}</b> — önerilen: ${lt.indexOf('Kira')>=0 ? 'Kiralama' : 'Satış'} paketi`;
+  document.getElementById('ilgi-task-hint').innerHTML = hint;
+  document.getElementById('ilgi-task-overlay').classList.add('open');
+}
+function closeIlgiTaskModal() {
+  document.getElementById('ilgi-task-overlay').classList.remove('open');
+  _ilgiTaskCtx = null;
+}
+async function ilgiCreateTaskPackage(tur) {
+  const key = tur === 'kiralama' ? 'interest_tasks_kiralama' : 'interest_tasks_satis';
+  const list = (state.cfg && state.cfg.custom_lists && state.cfg.custom_lists[key]) || [];
+  if (list.length === 0) {
+    showToast('Görev şablonu tanımlı değil (config: ' + key + ')', 'error');
+    closeIlgiTaskModal();
+    return;
+  }
+  const who = _ilgiTaskCtx && _ilgiTaskCtx.name ? _ilgiTaskCtx.name : '';
+  const suffix = who ? (' — ' + who) : '';
+  let ok = 0;
+  for (const title of list) {
+    try {
+      await API.createTask({ title: title + suffix, priority: 'normal', status: 'bekliyor' });
+      ok++;
+    } catch (e) {}
+  }
+  closeIlgiTaskModal();
+  showToast('✅ ' + ok + ' görev açıldı (' + (tur==='kiralama'?'Kiralama':'Satış') + ')');
+}
+
+async function ilgiAddCustomer() {
+  const name = document.getElementById('i-buyer-name').value.trim();
+  const phone = document.getElementById('i-buyer-phone').value.trim();
+  if (!name && !phone) { showToast('Önce alıcı adı veya telefonu girin', 'error'); return; }
+  try {
+    await API.createCustomer({ name: name || phone, phone: phone, source: 'İlgi' });
+    showToast('✅ Müşterilere eklendi');
+  } catch (e) {
+    // 409 = zaten kayıtlı
+    showToast(e.message || 'Eklenemedi', 'error');
+  }
+}
+
+document.getElementById('ilgi-musteri-btn')?.addEventListener('click', ilgiAddCustomer);
+document.getElementById('close-ilgi-task-modal')?.addEventListener('click', closeIlgiTaskModal);
+document.getElementById('ilgi-task-iptal')?.addEventListener('click', closeIlgiTaskModal);
+document.getElementById('ilgi-task-satis')?.addEventListener('click', () => ilgiCreateTaskPackage('satis'));
+document.getElementById('ilgi-task-kiralama')?.addEventListener('click', () => ilgiCreateTaskPackage('kiralama'));
+document.getElementById('yeni-ilgi-btn')?.addEventListener('click', () => openIlgiModal());
+document.getElementById('close-ilgi-modal')?.addEventListener('click', closeIlgiModal);
+document.getElementById('ilgi-iptal-btn')?.addEventListener('click', closeIlgiModal);
+document.getElementById('ilgi-kaydet-btn')?.addEventListener('click', saveIlgi);
+document.getElementById('i-type')?.addEventListener('change', function() {
+  const ns = document.getElementById('i-next-step');
+  if (!_ilgiState.editId && (!ns.value || Object.values(ILGI_SONRAKI_ONERI).includes(ns.value))) {
+    ns.value = ILGI_SONRAKI_ONERI[this.value] || '';
+  }
+  ilgiSyncFields();
+});
+document.getElementById('i-status')?.addEventListener('change', ilgiSyncFields);
+document.getElementById('ilgi-tip-filter')?.addEventListener('change', function() {
+  _ilgiState.tip = this.value; loadInterests();
+});

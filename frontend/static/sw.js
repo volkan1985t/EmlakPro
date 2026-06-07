@@ -2,7 +2,7 @@
    EmlakPro — Service Worker (PWA)
    ============================================================ */
 
-const CACHE_NAME = 'emlakpro-v202605211026';
+const CACHE_NAME = 'emlakpro-v202606052011';
 const STATIC_ASSETS = [
   '/',
   '/static/css/app.css',
@@ -45,6 +45,18 @@ self.addEventListener('fetch', event => {
           headers: { 'Content-Type': 'application/json' }
         })
       )
+    );
+    return;
+  }
+
+  // HTML / navigasyon: network-first (index.html her zaman güncel kalsın)
+  if (event.request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) {
+    event.respondWith(
+      fetch(event.request).then(response => {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+        return response;
+      }).catch(() => caches.match(event.request).then(c => c || caches.match('/')))
     );
     return;
   }

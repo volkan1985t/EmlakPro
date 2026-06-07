@@ -288,3 +288,24 @@ type PublicConfig struct {
 	AutoTaskTemplates interface{}         `json:"auto_task_templates"`
 	CustomLists       interface{}         `json:"custom_lists"`
 }
+
+// Interest — İlan İlgisi (lead/teklif takibi). Sadece kaydı giren danışman görür.
+type Interest struct {
+	ID          int64     `json:"id" db:"id"`
+	UserID      int64     `json:"user_id" db:"user_id"`
+	ListingID   int64     `json:"listing_id" db:"listing_id"`     // 0 = ilansız
+	CustomerID  int64     `json:"customer_id" db:"customer_id"`   // 0 = kayıtsız
+	BuyerName   string    `json:"buyer_name" db:"buyer_name"`
+	BuyerPhone  string    `json:"buyer_phone" db:"buyer_phone"`
+	Type        string    `json:"type" db:"type"`                 // bilgi|teklif|goruntuleme|belge|geri_arama|baska_portfoy
+	Status      string    `json:"status" db:"status"`             // yeni|gorusuluyor|pazarlik|sonuc
+	Outcome     string    `json:"outcome" db:"outcome"`           // kazanildi|kaybedildi|ilgilenmedi
+	OfferAmount string    `json:"offer_amount" db:"offer_amount"`
+	NextStep    string    `json:"next_step" db:"next_step"`
+	NextDate    string    `json:"next_date" db:"next_date"`       // "2006-01-02" veya ""
+	Notes       string    `json:"notes" db:"notes"`
+	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+	// Görüntü için join alanları
+	ListingTitle string `json:"listing_title,omitempty"`
+}
