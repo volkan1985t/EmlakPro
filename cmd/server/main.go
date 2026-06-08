@@ -56,6 +56,7 @@ func main() {
 	taskRepo     := repository.NewTaskRepository(db)
 	interestRepo := repository.NewInterestRepository(db)
 lookupRepo := repository.NewLookupRepository(db)
+deviceTokenRepo := repository.NewDeviceTokenRepository(db)
 
 	tokenSvc := auth.NewTokenService(
 		cfg.Auth.JWTSecret,
@@ -74,6 +75,7 @@ lookupRepo := repository.NewLookupRepository(db)
 	}
 
 	authMW := middleware.NewAuthMiddleware(tokenSvc)
+deviceMW := middleware.NewDeviceAuth(deviceTokenRepo.ResolveUserID)
 
 	authHandler      := handler.NewAuthHandler(cfg, userRepo, tokenSvc)
 	listingHandler   := handler.NewListingHandler(cfg, listingRepo, imageSvc)
@@ -138,6 +140,7 @@ lookupHandler := handler.NewLookupHandler(cfg, lookupRepo)
 		r.Post("/auth/refresh", authHandler.Refresh)
 		r.Get("/config",        configHandler.PublicConfig)
 		r.Get("/listings/share/{token}", listingHandler.GetByShareToken)
+r.With(deviceMW.Require).Get("/sorgu/lookup", lookupHandler.Lookup)
 
 		r.Group(func(r chi.Router) {
 			r.Use(authMW.RequireAuth)
