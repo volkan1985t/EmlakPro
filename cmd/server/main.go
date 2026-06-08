@@ -55,6 +55,7 @@ func main() {
 	customerRepo := repository.NewCustomerRepository(db)
 	taskRepo     := repository.NewTaskRepository(db)
 	interestRepo := repository.NewInterestRepository(db)
+lookupRepo := repository.NewLookupRepository(db)
 
 	tokenSvc := auth.NewTokenService(
 		cfg.Auth.JWTSecret,
@@ -95,6 +96,7 @@ func main() {
 	dashboardHandler := handler.NewDashboardHandler(db)
 	taskHandler      := handler.NewTaskHandler(taskRepo, imageSvc, telegramSvc)
 	interestHandler  := handler.NewInterestHandler(cfg, interestRepo)
+lookupHandler := handler.NewLookupHandler(cfg, lookupRepo)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -185,6 +187,7 @@ func main() {
 			r.Post("/interests",        interestHandler.Create)
 			r.Put("/interests/{id}",    interestHandler.Update)
 			r.Delete("/interests/{id}", interestHandler.Delete)
+r.Get("/lookup", lookupHandler.Lookup)
 
 			// Dashboard
 			r.Get("/dashboard", dashboardHandler.Stats)
